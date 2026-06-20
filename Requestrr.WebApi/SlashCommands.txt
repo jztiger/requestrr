@@ -136,6 +136,7 @@ namespace Requestrr.WebApi.RequestrrBot
                     var settings = _serviceProvider.Get<DiscordSettingsProvider>().Provide();
                     await ctx.CreateResponseAsync(InteractionResponseType.ChannelMessageWithSource, new DiscordInteractionResponseBuilder().AsEphemeral(settings.AutomaticallyPurgeCommandMessages).WithContent(Language.Current.DiscordCommandSending));
 
+                    _logger.LogInformation($"[MusicSearchDebug] Discord music command received artistName='{artistName}'");
                     var workFlow = _serviceProvider.Get<MusicWorkflowFactory>().CreateRequestingWorkflow(ctx.Interaction, [MUSIC_CATEGORY_ID]);
                     await workFlow.SearchMusicForArtistAsync(artistName.Trim());
                 }

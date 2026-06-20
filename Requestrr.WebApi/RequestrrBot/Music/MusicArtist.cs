@@ -5,6 +5,8 @@
         public string DownloadClientId { get; set; }
         public string ArtistId { get; set; }
         public string ArtistName { get; set; }
+        public string Disambiguation { get; set; }
+        public string ArtistType { get; set; }
         public string Overview { get; set; }
 
 

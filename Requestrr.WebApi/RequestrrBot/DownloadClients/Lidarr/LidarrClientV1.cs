@@ -282,6 +282,7 @@ namespace Requestrr.WebApi.RequestrrBot.DownloadClients.Lidarr
             try
             {
                 string searchTerm = Uri.EscapeDataString(artistName.ToLower().Trim());
+                _logger.LogInformation($"[MusicSearchDebug] Lidarr artist lookup - received artistName='{artistName}', encoded term='{searchTerm}'");
                 HttpResponseMessage response = await HttpGetAsync($"{BaseURL}/artist/lookup?term={searchTerm}");
                 await response.ThrowIfNotSuccessfulAsync("LidarrMusicArtistLookup failed", x => x.error);
 
@@ -498,6 +499,8 @@ namespace Requestrr.WebApi.RequestrrBot.DownloadClients.Lidarr
                 DownloadClientId = downloadClientId,
                 ArtistId = jsonArtist.ForeignArtistId.ToString(),
                 ArtistName = jsonArtist.ArtistName,
+                Disambiguation = jsonArtist.Disambiguation,
+                ArtistType = jsonArtist.ArtistType,
                 Overview = jsonArtist.Overview,
 
                 Available = (jsonArtist.Statistics?.SizeOnDisk ?? -1) > 0,

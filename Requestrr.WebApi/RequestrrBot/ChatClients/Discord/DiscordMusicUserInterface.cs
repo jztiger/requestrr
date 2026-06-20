@@ -26,7 +26,7 @@ namespace Requestrr.WebApi.RequestrrBot.ChatClients.Discord
 
         public async Task ShowMusicArtistSelection(MusicRequest request, IReadOnlyList<MusicArtist> music)
         {
-            List<DiscordSelectComponentOption> options = music.Take(15).Select(x => new DiscordSelectComponentOption(GetFormattedMusicArtistName(x), $"{request.CategoryId}/{x.ArtistId}")).ToList();
+            List<DiscordSelectComponentOption> options = music.Take(15).Select(x => new DiscordSelectComponentOption(GetFormattedMusicArtistName(x), $"{request.CategoryId}/{x.ArtistId}", GetMusicArtistDescription(x))).ToList();
             DiscordSelectComponent select = new DiscordSelectComponent($"MuRSA/{_interactionContext.User.Id}/{request.CategoryId}", LimitStringSize(Language.Current.DiscordCommandMusicArtistRequestHelpDropdown), options);
 
             await _interactionContext.EditOriginalResponseAsync(new DiscordWebhookBuilder().AddComponents(select).WithContent(Language.Current.DiscordCommandMusicArtistRequestHelp));
@@ -135,6 +135,11 @@ namespace Requestrr.WebApi.RequestrrBot.ChatClients.Discord
         private string GetFormattedMusicArtistName(MusicArtist music)
         {
             return LimitStringSize(music.ArtistName);
+        }
+        private string GetMusicArtistDescription(MusicArtist music)
+        {
+            string desc = !string.IsNullOrWhiteSpace(music.Disambiguation) ? music.Disambiguation : music.ArtistType;
+            return string.IsNullOrWhiteSpace(desc) ? null : LimitStringSize(desc);
         }
         private string LimitStringSize(string value, int limit = 100)
         {
