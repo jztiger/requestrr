@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Threading;
@@ -22,6 +23,14 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
         private CancellationTokenSource _cts;
         private Task _pollTask;
 
+        // Guards against a job's restore ever being attempted twice, including under genuine
+        // concurrency (overlapping poll ticks, or a poll tick racing a direct CheckJobAsync
+        // call) where the job.State field read at the top of CheckJobAsync can be stale for one
+        // of the racing callers. A job's Id is claimed here immediately before the restore
+        // attempt and is never released for the lifetime of this engine instance.
+        private readonly object _restoreLock = new object();
+        private readonly HashSet<Guid> _inFlightRestores = new HashSet<Guid>();
+
         public RedownloadEngine(Func<bool, IRedownloadMediaClient> clientSelector, RedownloadJobsRepository repo,
                                  IRedownloadMessenger messenger, ILogger logger, TimeSpan pollInterval,
                                  Func<DateTime> utcNow = null)
@@ -38,12 +47,17 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
 
         // Sequence is BINDING (spec Section 3): capture current file -> ensure monitored ->
         // find grab history id -> post public message -> DELETE -> blocklist (skipped, with a
-        // flag, when there's no grab history) -> trigger search -> persist job. The blocklist
-        // and search calls are each individually wrapped: once the file is gone, a failure in
-        // either of those steps must never leave the deletion un-tracked, so the job is always
-        // persisted at the end regardless of what happened after the delete. Failures are
-        // logged (not surfaced in the already-posted public message, which was written before
-        // either call ran and doesn't get edited again until CheckJobAsync's next outcome).
+        // flag, when there's no grab history) -> trigger search -> persist job.
+        //
+        // The job is persisted (State=Searching, DeadlineUtc already computed) BEFORE the
+        // delete, not after: once the file is gone, the persisted job record is the ONLY thing
+        // that can ever trigger a restore. Deferring persistence to the end of the method would
+        // leave a crash window (process death between delete and the final Add/Update) where a
+        // real file is destroyed with zero record of it -- permanent, silent data loss. DeleteFile,
+        // MarkHistoryFailed, and TriggerSearchAsync are each individually wrapped so a failure in
+        // any one of them never stops the others from running and never leaves the (already
+        // persisted) job un-updated; the job is always re-persisted at the end regardless of what
+        // happened after the delete.
         public async Task<RedownloadJob> BeginAsync(RedownloadTarget target, ulong requesterId, string requesterName,
                                                       ulong channelId, int timeoutMinutes)
         {
@@ -77,8 +91,22 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
             job.ChannelId = postedChannelId;
             job.MessageId = postedMessageId;
 
+            // Persist BEFORE the delete. DeadlineUtc MUST be computed here, not left at its
+            // default: an unset deadline would make the very next poll tick treat this job as
+            // already past-deadline and attempt a restore while BeginAsync is still mid-flight.
+            job.State = RedownloadJobState.Searching;
+            job.DeadlineUtc = _utcNow().AddMinutes(timeoutMinutes);
+            _repo.Add(job);
+
             var fileIdToDelete = currentFile?.Id ?? target.FileId;
-            await client.DeleteFileAsync(fileIdToDelete);
+            try
+            {
+                await client.DeleteFileAsync(fileIdToDelete);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Redownload: deleting the old file failed for '{job.DisplayTitle}' (the job is already persisted -- worst case the deadline passes, restore finds nothing to import, and the job lands on RestoreFailed rather than being lost): {ex.Message}");
+            }
 
             if (historyId.HasValue)
             {
@@ -88,6 +116,11 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
                 }
                 catch (Exception ex)
                 {
+                    // The already-posted public message optimistically said "blocklisted" (it
+                    // was written before this call ran). Correct the persisted record so every
+                    // later rewrite (success/restore/restore-failed edit) tells the truth
+                    // instead of repeating a claim that never actually happened.
+                    job.BlocklistedHistoryId = null;
                     _logger.LogError(ex, $"Redownload: blocklisting grab history {historyId.Value} failed for '{job.DisplayTitle}' (the deleted file is NOT orphaned — the job still persists and will resolve via search or timeout restore): {ex.Message}");
                 }
             }
@@ -101,10 +134,7 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
                 _logger.LogError(ex, $"Redownload: triggering search failed for '{job.DisplayTitle}' (the deleted file is NOT orphaned — the job still persists and will resolve via timeout restore if no manual/automatic search succeeds): {ex.Message}");
             }
 
-            job.State = RedownloadJobState.Searching;
-            job.DeadlineUtc = _utcNow().AddMinutes(timeoutMinutes);
-
-            _repo.Add(job);
+            _repo.Update(job);
 
             return job;
         }
@@ -139,6 +169,21 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
                 return;
             }
 
+            // Claim this job's restore slot atomically before doing anything else. The
+            // State-gate at the top of this method reads a possibly-stale State off a
+            // snapshot/shared job reference and is NOT sufficient on its own to prevent two
+            // concurrent callers (overlapping poll ticks, or a poll tick racing a direct
+            // CheckJobAsync call) from both reaching this point before either has persisted a
+            // state change. Once claimed here, this job's restore is never attempted again for
+            // the lifetime of this engine instance.
+            lock (_restoreLock)
+            {
+                if (!_inFlightRestores.Add(job.Id))
+                {
+                    return;
+                }
+            }
+
             await HandleDeadlineAsync(job, client, target);
         }
 
@@ -149,10 +194,13 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
             var content = BuildBaseMessage(job) +
                 $"\n✅ Replaced with {currentFile.Quality} · {sizeGb.ToString("F1", CultureInfo.InvariantCulture)} GB · {currentFile.ReleaseGroup} · {elapsedMinutes}m";
 
-            await _messenger.EditPublicAsync(job.ChannelId, job.MessageId, content);
-
+            // State is persisted BEFORE the edit is attempted: a permanently-failing edit (e.g.
+            // the Discord message was deleted) must not leave this job stuck in Searching
+            // forever, polling the arr API on every tick indefinitely.
             job.State = RedownloadJobState.Completed;
             _repo.Update(job);
+
+            await EditPublicSafeAsync(job, content);
         }
 
         private async Task HandleDeadlineAsync(RedownloadJob job, IRedownloadMediaClient client, RedownloadTarget target)
@@ -169,8 +217,8 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
             }
 
             // State-write immediately after the attempt, before the (possibly failing) message
-            // edit -- this is what makes the state-gate above effective at preventing a second
-            // restore attempt.
+            // edit -- this is what makes the state-gate/claim above effective at preventing a
+            // second restore attempt.
             job.State = restored ? RedownloadJobState.Restored : RedownloadJobState.RestoreFailed;
             _repo.Update(job);
 
@@ -179,7 +227,24 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
                 : "\n⚠️ No replacement found and restoring the original failed — an admin needs to check the recycle bin.";
 
             var content = BuildBaseMessage(job) + suffix;
-            await _messenger.EditPublicAsync(job.ChannelId, job.MessageId, content);
+            await EditPublicSafeAsync(job, content);
+        }
+
+        // Both success and restore paths persist State BEFORE attempting the edit (see above);
+        // this helper makes sure a permanently-failing edit (e.g. Discord message deleted) can
+        // never surface as an unhandled exception either -- the job is already durably resolved,
+        // so a stale/missing status message is an acceptable, logged degradation, not a retry
+        // trigger.
+        private async Task EditPublicSafeAsync(RedownloadJob job, string content)
+        {
+            try
+            {
+                await _messenger.EditPublicAsync(job.ChannelId, job.MessageId, content);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Redownload: status message edit failed for '{job.DisplayTitle}' (job state already persisted; message may be stale): {ex.Message}");
+            }
         }
 
         // ---- Start / StopAsync -------------------------------------------------------
@@ -188,6 +253,15 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
         // MusicNotificationEngine pattern).
         public void Start()
         {
+            // Re-entrancy guard: a second Start() call while a poll loop is already running
+            // (e.g. ChatBot-style stop/start around a settings save racing the engine's own
+            // lifecycle, or simple caller error) must be a no-op, not a second concurrent loop
+            // double-processing every active job.
+            if (_pollTask != null && !_pollTask.IsCompleted)
+            {
+                return;
+            }
+
             _cts = new CancellationTokenSource();
             var token = _cts.Token;
 

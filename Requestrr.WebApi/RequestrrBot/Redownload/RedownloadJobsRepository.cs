@@ -69,11 +69,16 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
             }
         }
 
+        // Stores a clone, not the caller's reference -- callers (notably RedownloadEngine) keep
+        // mutating their local job object after Add() returns (e.g. correcting
+        // BlocklistedHistoryId after a failed blocklist call, then calling Update()), and that
+        // must never silently leak into the repository's in-memory/persisted state ahead of an
+        // explicit Update() call.
         public void Add(RedownloadJob job)
         {
             lock (_lock)
             {
-                _jobs.Add(job);
+                _jobs.Add(Clone(job));
                 Save();
             }
         }
@@ -86,7 +91,7 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
                 if (index == -1)
                     throw new InvalidOperationException($"RedownloadJob with Id '{job.Id}' was not found; Update only replaces jobs already tracked by the repository.");
 
-                _jobs[index] = job;
+                _jobs[index] = Clone(job);
                 Save();
             }
         }

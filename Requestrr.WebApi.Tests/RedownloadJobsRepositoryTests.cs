@@ -162,6 +162,47 @@ namespace Requestrr.WebApi.Tests
         }
 
         [Fact]
+        public void Add_ThenMutateOriginalObject_DoesNotAffectRepository()
+        {
+            // Add() must store a clone, not the caller's reference: RedownloadEngine keeps
+            // mutating its local job object after Add() returns (e.g. correcting
+            // BlocklistedHistoryId to null after a failed blocklist call) before calling
+            // Update() -- that must never silently leak into the repository ahead of time.
+            var repo = new RedownloadJobsRepository(_tempPath);
+            var job = MakeJob(arrId: 88, state: RedownloadJobState.Searching);
+            repo.Add(job);
+
+            job.State = RedownloadJobState.Completed;
+            job.DisplayTitle = "Mutated After Add";
+
+            Assert.True(repo.HasActiveFor(job.IsMovie, job.ArrId));
+            var active = repo.GetActive().Single();
+            Assert.Equal(RedownloadJobState.Searching, active.State);
+            Assert.NotEqual("Mutated After Add", active.DisplayTitle);
+        }
+
+        [Fact]
+        public void Update_ThenMutateOriginalObject_DoesNotAffectRepository()
+        {
+            // Same guarantee for Update(): the repository must not retain the caller's
+            // reference there either.
+            var repo = new RedownloadJobsRepository(_tempPath);
+            var job = MakeJob(arrId: 89, state: RedownloadJobState.Searching);
+            repo.Add(job);
+
+            job.State = RedownloadJobState.Completed;
+            repo.Update(job);
+
+            job.State = RedownloadJobState.Searching;
+            job.DisplayTitle = "Mutated After Update";
+
+            Assert.False(repo.HasActiveFor(job.IsMovie, job.ArrId));
+
+            var json = File.ReadAllText(_tempPath);
+            Assert.DoesNotContain("Mutated After Update", json);
+        }
+
+        [Fact]
         public void GetActive_ReturnsSnapshots_MutatingReturnedJobDoesNotAffectRepository()
         {
             var repo = new RedownloadJobsRepository(_tempPath);

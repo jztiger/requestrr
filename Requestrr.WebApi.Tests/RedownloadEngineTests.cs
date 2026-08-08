@@ -41,6 +41,20 @@ namespace Requestrr.WebApi.Tests
             public Exception RestoreThrows;
             public Exception TriggerSearchThrows;
             public Exception MarkHistoryFailedThrows;
+            public Exception DeleteFileThrows;
+
+            // Invoked synchronously, right as the corresponding call happens, so a test can
+            // inspect repository state exactly "during" that call (all fakes here are
+            // synchronous, so this reflects real happens-before ordering relative to whatever
+            // BeginAsync already did, e.g. the pre-delete persist).
+            public Action BeforeDeleteFile;
+            public Action BeforeMarkHistoryFailed;
+            public Action BeforeTriggerSearch;
+
+            // When set, RestoreFromRecycleBinAsync suspends on this until it's completed --
+            // used to force two CheckJobAsync calls to genuinely race past the state-gate before
+            // either has persisted a state change, exercising the _inFlightRestores claim itself.
+            public TaskCompletionSource<bool> RestoreGate;
 
             public readonly List<int> DeletedFileIds = new List<int>();
             public readonly List<long> BlocklistedHistoryIds = new List<long>();
@@ -77,6 +91,9 @@ namespace Requestrr.WebApi.Tests
             {
                 Calls.Add("DeleteFile");
                 DeletedFileIds.Add(fileId);
+                BeforeDeleteFile?.Invoke();
+                if (DeleteFileThrows != null)
+                    throw DeleteFileThrows;
                 return Task.CompletedTask;
             }
 
@@ -84,6 +101,7 @@ namespace Requestrr.WebApi.Tests
             {
                 Calls.Add("MarkHistoryFailed");
                 BlocklistedHistoryIds.Add(historyId);
+                BeforeMarkHistoryFailed?.Invoke();
                 if (MarkHistoryFailedThrows != null)
                     throw MarkHistoryFailedThrows;
                 return Task.CompletedTask;
@@ -93,20 +111,26 @@ namespace Requestrr.WebApi.Tests
             {
                 Calls.Add("TriggerSearch");
                 SearchTriggeredFor.Add(t);
+                BeforeTriggerSearch?.Invoke();
                 if (TriggerSearchThrows != null)
                     throw TriggerSearchThrows;
                 return Task.CompletedTask;
             }
 
-            public Task<bool> RestoreFromRecycleBinAsync(RedownloadTarget t, string originalFileName)
+            public async Task<bool> RestoreFromRecycleBinAsync(RedownloadTarget t, string originalFileName)
             {
                 Calls.Add("Restore");
                 RestoreCallCount++;
                 RestoreCalledWithTarget = t;
                 RestoreCalledWithFileName = originalFileName;
+
+                if (RestoreGate != null)
+                    await RestoreGate.Task;
+
                 if (RestoreThrows != null)
                     throw RestoreThrows;
-                return Task.FromResult(RestoreResult);
+
+                return RestoreResult;
             }
         }
 
@@ -179,6 +203,32 @@ namespace Requestrr.WebApi.Tests
         {
             return new RedownloadEngine(_ => client, repo, messenger, logger,
                 pollInterval ?? TimeSpan.FromMilliseconds(50), utcNow ?? (() => DateTime.UtcNow));
+        }
+
+        private static RedownloadJob MakeSeedJob(DateTime deadlineUtc)
+        {
+            return new RedownloadJob
+            {
+                Id = Guid.NewGuid(),
+                IsMovie = false,
+                ArrId = 10,
+                SeriesId = 5,
+                OldFileId = 100,
+                DisplayTitle = "Some Show - S01E01",
+                OldFilePath = "/data/plexmedia/TV/Some Show/Season 01/Some.Show.S01E01.mkv",
+                OldFileName = "Some.Show.S01E01.mkv",
+                OldQuality = "WEBDL-1080p",
+                OldSizeBytes = 1_500_000_000L,
+                OldReleaseGroup = "GROUP",
+                BlocklistedHistoryId = 777,
+                ChannelId = 222UL,
+                MessageId = 333UL,
+                RequestedByUserId = 111UL,
+                RequestedByUsername = "someuser",
+                CreatedUtc = DateTime.UtcNow,
+                DeadlineUtc = deadlineUtc,
+                State = RedownloadJobState.Searching
+            };
         }
 
         // ---- BeginAsync -------------------------------------------------------
@@ -259,7 +309,16 @@ namespace Requestrr.WebApi.Tests
             var engine = MakeEngine(client, repo, messenger, logger);
             var target = MakeTarget();
 
+            RedownloadJob persistedDuringFailure = null;
+            client.BeforeMarkHistoryFailed = () => persistedDuringFailure = repo.GetActive().SingleOrDefault();
+
             var job = await engine.BeginAsync(target, 111UL, "someuser", 222UL, 30);
+
+            // Persisted BEFORE the delete (and therefore already there the instant the
+            // blocklist call fails) -- proven by inspecting the repo from inside the throwing
+            // call itself, not just after BeginAsync returns.
+            Assert.NotNull(persistedDuringFailure);
+            Assert.Equal(RedownloadJobState.Searching, persistedDuringFailure.State);
 
             // the deleted file must never be silently orphaned: the job is persisted anyway,
             // and the search still runs despite the blocklist failure.
@@ -268,6 +327,17 @@ namespace Requestrr.WebApi.Tests
             Assert.Contains(100, client.DeletedFileIds);
             Assert.Contains("TriggerSearch", client.Calls);
             Assert.NotEmpty(logger.Errors);
+
+            // The message must stop claiming "blocklisted" once the blocklist call actually
+            // failed -- BlocklistedHistoryId is corrected to null so every later rewrite tells
+            // the truth instead of repeating a claim that never happened.
+            Assert.Null(job.BlocklistedHistoryId);
+
+            client.GetCurrentFile = _ => MakeFile(200, quality: "WEBDL-2160p", sizeBytes: 5_000_000_000L, releaseGroup: "NEWGROUP");
+            await engine.CheckJobAsync(job);
+
+            Assert.Single(messenger.Edits);
+            Assert.Contains("couldn't blocklist", messenger.Edits[0].content);
         }
 
         [Fact]
@@ -282,13 +352,75 @@ namespace Requestrr.WebApi.Tests
             var engine = MakeEngine(client, repo, messenger, logger);
             var target = MakeTarget();
 
+            RedownloadJob persistedDuringFailure = null;
+            client.BeforeTriggerSearch = () => persistedDuringFailure = repo.GetActive().SingleOrDefault();
+
             var job = await engine.BeginAsync(target, 111UL, "someuser", 222UL, 30);
+
+            // Persisted BEFORE the delete -- already there the instant the search call fails.
+            Assert.NotNull(persistedDuringFailure);
+            Assert.Equal(RedownloadJobState.Searching, persistedDuringFailure.State);
 
             // the deleted file must never be silently orphaned: the job is persisted anyway
             Assert.Equal(RedownloadJobState.Searching, job.State);
             Assert.True(repo.HasActiveFor(target.IsMovie, target.ArrId));
             Assert.Contains(100, client.DeletedFileIds);
             Assert.NotEmpty(logger.Errors);
+        }
+
+        [Fact]
+        public async Task BeginAsync_DeleteThrows_JobStillPersisted()
+        {
+            var client = new FakeRedownloadMediaClient { LastGrabHistoryId = 777 };
+            client.GetCurrentFile = _ => MakeFile(100);
+            client.DeleteFileThrows = new InvalidOperationException("delete timed out");
+            var repo = new RedownloadJobsRepository(_tempPath);
+            var messenger = new FakeRedownloadMessenger();
+            var logger = new FakeLogger();
+            var engine = MakeEngine(client, repo, messenger, logger);
+            var target = MakeTarget();
+
+            var job = await engine.BeginAsync(target, 111UL, "someuser", 222UL, 30);
+
+            // A delete-timeout that throws must not stop the blocklist/search steps from
+            // running, nor stop the job from persisting -- worst case the deadline eventually
+            // passes and a restore attempt finds nothing to import, landing on RestoreFailed
+            // rather than losing the job's record entirely.
+            Assert.Equal(RedownloadJobState.Searching, job.State);
+            Assert.True(repo.HasActiveFor(target.IsMovie, target.ArrId));
+            Assert.Contains("MarkHistoryFailed", client.Calls);
+            Assert.Contains("TriggerSearch", client.Calls);
+            Assert.NotEmpty(logger.Errors);
+        }
+
+        [Fact]
+        public async Task BeginAsync_PersistsJobBeforeDelete_WithCorrectDeadline()
+        {
+            var now = new DateTime(2026, 8, 8, 12, 0, 0, DateTimeKind.Utc);
+            var client = new FakeRedownloadMediaClient { LastGrabHistoryId = 777 };
+            client.GetCurrentFile = _ => MakeFile(100);
+            var repo = new RedownloadJobsRepository(_tempPath);
+            var messenger = new FakeRedownloadMessenger();
+            var logger = new FakeLogger();
+            var engine = MakeEngine(client, repo, messenger, logger, utcNow: () => now);
+            var target = MakeTarget();
+
+            RedownloadJob persistedDuringDelete = null;
+            client.BeforeDeleteFile = () =>
+            {
+                Assert.True(repo.HasActiveFor(target.IsMovie, target.ArrId));
+                persistedDuringDelete = repo.GetActive().Single();
+            };
+
+            await engine.BeginAsync(target, 111UL, "someuser", 222UL, 30);
+
+            // The job -- including its deadline -- must exist in the repository BEFORE the
+            // delete call runs, and DeadlineUtc must already be the real computed value (not a
+            // default DateTime, which would make the poll loop's very first tick see this job
+            // as already past-deadline and try to restore it mid-Begin).
+            Assert.NotNull(persistedDuringDelete);
+            Assert.Equal(RedownloadJobState.Searching, persistedDuringDelete.State);
+            Assert.Equal(now.AddMinutes(30), persistedDuringDelete.DeadlineUtc);
         }
 
         // ---- CheckJobAsync -------------------------------------------------------
@@ -408,33 +540,53 @@ namespace Requestrr.WebApi.Tests
             Assert.Equal(1, client.RestoreCallCount);
         }
 
+        [Fact]
+        public async Task CheckJob_ConcurrentCallsPastDeadline_RestoresExactlyOnce()
+        {
+            var now = new DateTime(2026, 8, 8, 12, 0, 0, DateTimeKind.Utc);
+            var client = new FakeRedownloadMediaClient { LastGrabHistoryId = 777 };
+            client.GetCurrentFile = _ => MakeFile(100); // no new file ever arrives
+            var repo = new RedownloadJobsRepository(_tempPath);
+            var messenger = new FakeRedownloadMessenger();
+            var logger = new FakeLogger();
+            var engine = MakeEngine(client, repo, messenger, logger, utcNow: () => now);
+            var target = MakeTarget();
+
+            var job = await engine.BeginAsync(target, 111UL, "someuser", 222UL, 30);
+            now = job.DeadlineUtc.AddMinutes(1);
+
+            client.RestoreGate = new TaskCompletionSource<bool>();
+
+            // Neither call is awaited before starting the other: each fake call up through
+            // GetCurrentFileAsync resolves synchronously, so both calls reach the deadline check
+            // and the restore-claim before either has persisted a state change -- job.State is
+            // STILL Searching for both at that point. The first to reach the lock claims
+            // _inFlightRestores and suspends inside RestoreFromRecycleBinAsync (awaiting the
+            // still-incomplete RestoreGate); the second finds the claim already taken and
+            // returns immediately WITHOUT ever calling RestoreFromRecycleBinAsync. This proves
+            // the HashSet guard itself is doing the work, not just the (racy) top-of-method
+            // State check.
+            var taskA = engine.CheckJobAsync(job);
+            var taskB = engine.CheckJobAsync(job);
+
+            Assert.Equal(1, client.RestoreCallCount);
+            Assert.False(taskA.IsCompleted);
+            Assert.True(taskB.IsCompleted);
+
+            client.RestoreGate.SetResult(true);
+            await Task.WhenAll(taskA, taskB);
+
+            Assert.Equal(1, client.RestoreCallCount);
+            Assert.Equal(RedownloadJobState.Restored, job.State);
+            Assert.Single(messenger.Edits);
+        }
+
         // ---- Start / StopAsync -------------------------------------------------------
 
         [Fact]
         public async Task Start_ResumesPersistedSearchingJobs()
         {
-            var job = new RedownloadJob
-            {
-                Id = Guid.NewGuid(),
-                IsMovie = false,
-                ArrId = 10,
-                SeriesId = 5,
-                OldFileId = 100,
-                DisplayTitle = "Some Show - S01E01",
-                OldFilePath = "/data/plexmedia/TV/Some Show/Season 01/Some.Show.S01E01.mkv",
-                OldFileName = "Some.Show.S01E01.mkv",
-                OldQuality = "WEBDL-1080p",
-                OldSizeBytes = 1_500_000_000L,
-                OldReleaseGroup = "GROUP",
-                BlocklistedHistoryId = 777,
-                ChannelId = 222UL,
-                MessageId = 333UL,
-                RequestedByUserId = 111UL,
-                RequestedByUsername = "someuser",
-                CreatedUtc = DateTime.UtcNow,
-                DeadlineUtc = DateTime.UtcNow.AddMinutes(30),
-                State = RedownloadJobState.Searching
-            };
+            var job = MakeSeedJob(DateTime.UtcNow.AddMinutes(30));
 
             var seedRepo = new RedownloadJobsRepository(_tempPath);
             seedRepo.Add(job);
@@ -485,6 +637,37 @@ namespace Requestrr.WebApi.Tests
             await Task.Delay(150);
 
             Assert.Equal(callCountAtStop, client.Calls.Count);
+        }
+
+        [Fact]
+        public async Task Start_CalledTwice_DoesNotRunASecondPollingLoop()
+        {
+            // A job that never resolves (current file always equals OldFileId, deadline far in
+            // the future) so it stays Searching and gets re-checked on every poll tick for the
+            // duration of the test -- letting us count ticks via GetCurrentFile call volume.
+            var job = MakeSeedJob(DateTime.UtcNow.AddDays(1));
+            var seedRepo = new RedownloadJobsRepository(_tempPath);
+            seedRepo.Add(job);
+
+            var client = new FakeRedownloadMediaClient();
+            client.GetCurrentFile = _ => MakeFile(100); // same as OldFileId -> never "succeeds"
+            var repo = new RedownloadJobsRepository(_tempPath);
+            var messenger = new FakeRedownloadMessenger();
+            var logger = new FakeLogger();
+            var engine = MakeEngine(client, repo, messenger, logger, pollInterval: TimeSpan.FromMilliseconds(20));
+
+            engine.Start();
+            engine.Start(); // must be a no-op: a loop is already running
+
+            await Task.Delay(220); // ~11 ticks for a single loop
+            await engine.StopAsync();
+
+            var getCurrentFileCalls = client.Calls.Count(c => c == "GetCurrentFile");
+
+            // A single loop ticking every 20ms for ~220ms produces roughly 10-12 calls; a
+            // doubled loop would produce roughly twice that. Generous bound to absorb scheduler
+            // jitter while still clearly separating single- from double-loop behavior.
+            Assert.InRange(getCurrentFileCalls, 1, 16);
         }
     }
 }
