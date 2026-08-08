@@ -132,6 +132,62 @@ namespace Requestrr.WebApi.Tests
         }
 
         [Fact]
+        public void Update_ReplacesStoredJobByIdEvenWithDistinctObjectInstance()
+        {
+            // The success-path HasActiveFor test above mutates the SAME object reference that
+            // was passed to Add, so it would pass even if Update never actually replaced
+            // anything in the internal list. This test uses a wholly distinct RedownloadJob
+            // instance (same Id, different field values) to positively prove Update performs a
+            // find-by-Id-and-replace, not just a re-save of whatever's already in memory.
+            var repo = new RedownloadJobsRepository(_tempPath);
+            var original = MakeJob(state: RedownloadJobState.Searching);
+            original.DisplayTitle = "Original Title";
+            repo.Add(original);
+
+            var replacement = MakeJob(id: original.Id, state: RedownloadJobState.Completed);
+            replacement.DisplayTitle = "Replacement Title";
+            Assert.NotSame(original, replacement);
+
+            repo.Update(replacement);
+
+            var reloaded = new RedownloadJobsRepository(_tempPath);
+            Assert.False(reloaded.HasActiveFor(original.IsMovie, original.ArrId));
+
+            // Reach past GetActive() (Searching-only) by re-adding a Searching probe isn't
+            // appropriate here; instead confirm via the file contents that the replacement's
+            // values won, not the original's.
+            var json = File.ReadAllText(_tempPath);
+            Assert.Contains("Replacement Title", json);
+            Assert.DoesNotContain("Original Title", json);
+        }
+
+        [Fact]
+        public void GetActive_ReturnsSnapshots_MutatingReturnedJobDoesNotAffectRepository()
+        {
+            var repo = new RedownloadJobsRepository(_tempPath);
+            var job = MakeJob(arrId: 77, state: RedownloadJobState.Searching);
+            repo.Add(job);
+
+            var active = repo.GetActive();
+            Assert.Single(active);
+            var snapshot = active[0];
+            snapshot.State = RedownloadJobState.Completed;
+            snapshot.DisplayTitle = "Mutated Locally Only";
+
+            // The repository's in-memory state (and hence what a later GetActive/HasActiveFor
+            // sees) must be unaffected by mutating the object handed back from GetActive.
+            Assert.True(repo.HasActiveFor(job.IsMovie, job.ArrId));
+            var stillActive = repo.GetActive();
+            Assert.Single(stillActive);
+            Assert.Equal(RedownloadJobState.Searching, stillActive[0].State);
+            Assert.NotEqual("Mutated Locally Only", stillActive[0].DisplayTitle);
+
+            // And nothing was persisted from the mutation either.
+            var reloaded = new RedownloadJobsRepository(_tempPath);
+            Assert.True(reloaded.HasActiveFor(job.IsMovie, job.ArrId));
+        }
+
+        [Fact]
         public void HasActiveFor_DistinguishesByIsMovieAndArrId()
         {
             var repo = new RedownloadJobsRepository(_tempPath);

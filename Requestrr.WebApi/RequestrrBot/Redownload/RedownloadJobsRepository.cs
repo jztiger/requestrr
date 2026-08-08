@@ -48,11 +48,16 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
             File.WriteAllText(_filePath, JsonConvert.SerializeObject(_jobs));
         }
 
+        /// <summary>
+        /// Returns snapshots (clones) of the currently Searching jobs. Mutating a returned
+        /// instance does NOT affect the repository's in-memory state or the persisted file —
+        /// callers must pass the mutated clone to <see cref="Update"/> to persist changes.
+        /// </summary>
         public IReadOnlyList<RedownloadJob> GetActive()
         {
             lock (_lock)
             {
-                return _jobs.Where(j => j.State == RedownloadJobState.Searching).ToList();
+                return _jobs.Where(j => j.State == RedownloadJobState.Searching).Select(Clone).ToList();
             }
         }
 
@@ -84,6 +89,32 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
                 _jobs[index] = job;
                 Save();
             }
+        }
+
+        private static RedownloadJob Clone(RedownloadJob job)
+        {
+            return new RedownloadJob
+            {
+                Id = job.Id,
+                IsMovie = job.IsMovie,
+                ArrId = job.ArrId,
+                SeriesId = job.SeriesId,
+                OldFileId = job.OldFileId,
+                DisplayTitle = job.DisplayTitle,
+                OldFilePath = job.OldFilePath,
+                OldFileName = job.OldFileName,
+                OldQuality = job.OldQuality,
+                OldSizeBytes = job.OldSizeBytes,
+                OldReleaseGroup = job.OldReleaseGroup,
+                BlocklistedHistoryId = job.BlocklistedHistoryId,
+                ChannelId = job.ChannelId,
+                MessageId = job.MessageId,
+                RequestedByUserId = job.RequestedByUserId,
+                RequestedByUsername = job.RequestedByUsername,
+                CreatedUtc = job.CreatedUtc,
+                DeadlineUtc = job.DeadlineUtc,
+                State = job.State
+            };
         }
     }
 }
