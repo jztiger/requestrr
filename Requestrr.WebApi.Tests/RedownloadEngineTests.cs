@@ -144,6 +144,12 @@ namespace Requestrr.WebApi.Tests
             // log as the client's delete/blocklist/search calls.
             public List<string> SharedCallLog;
 
+            // When set, EditPublicAsync throws after recording the attempted edit (so tests can
+            // still see what content it tried to send) -- used to prove state is persisted
+            // BEFORE the edit is attempted, and a permanently-failing edit degrades cleanly
+            // rather than leaving a job stuck.
+            public Exception EditThrows;
+
             public Task<(ulong channelId, ulong messageId)> PostPublicAsync(ulong channelId, string content)
             {
                 SharedCallLog?.Add("PostPublic");
@@ -155,6 +161,8 @@ namespace Requestrr.WebApi.Tests
             public Task EditPublicAsync(ulong channelId, ulong messageId, string content)
             {
                 Edits.Add((channelId, messageId, content));
+                if (EditThrows != null)
+                    throw EditThrows;
                 return Task.CompletedTask;
             }
         }
@@ -458,6 +466,43 @@ namespace Requestrr.WebApi.Tests
         }
 
         [Fact]
+        public async Task CheckJob_SuccessEditThrows_JobStillCompletes()
+        {
+            var now = new DateTime(2026, 8, 8, 12, 0, 0, DateTimeKind.Utc);
+            var client = new FakeRedownloadMediaClient { LastGrabHistoryId = 777 };
+            client.GetCurrentFile = _ => MakeFile(100);
+            var repo = new RedownloadJobsRepository(_tempPath);
+            var messenger = new FakeRedownloadMessenger { EditThrows = new InvalidOperationException("Discord message was deleted") };
+            var logger = new FakeLogger();
+            var engine = MakeEngine(client, repo, messenger, logger, utcNow: () => now);
+            var target = MakeTarget();
+
+            var job = await engine.BeginAsync(target, 111UL, "someuser", 222UL, 30);
+
+            client.GetCurrentFile = _ => MakeFile(200, quality: "WEBDL-2160p", sizeBytes: 5_000_000_000L, releaseGroup: "NEWGROUP");
+            now = now.AddMinutes(17);
+
+            // Must not throw: a permanently-failing edit (e.g. the status message was deleted)
+            // is caught and logged, not propagated.
+            await engine.CheckJobAsync(job);
+
+            Assert.Equal(RedownloadJobState.Completed, job.State);
+            Assert.Single(messenger.Edits); // the edit WAS attempted (and recorded before throwing)
+            Assert.NotEmpty(logger.Errors);
+
+            // State must be durably persisted despite the edit failure -- proven from a fresh
+            // repository instance, not just the in-memory job reference.
+            var reloaded = new RedownloadJobsRepository(_tempPath);
+            Assert.False(reloaded.HasActiveFor(target.IsMovie, target.ArrId));
+
+            // Terminal state respected: a second CheckJobAsync on the same job must not make any
+            // further client calls (the top-of-method state-gate short-circuits immediately).
+            var callCountAfterFirstCheck = client.Calls.Count;
+            await engine.CheckJobAsync(job);
+            Assert.Equal(callCountAfterFirstCheck, client.Calls.Count);
+        }
+
+        [Fact]
         public async Task CheckJob_PastDeadline_RestoresExactlyOnce()
         {
             var now = new DateTime(2026, 8, 8, 12, 0, 0, DateTimeKind.Utc);
@@ -538,6 +583,43 @@ namespace Requestrr.WebApi.Tests
             // Restore must still run at most once even when it threw.
             await engine.CheckJobAsync(job);
             Assert.Equal(1, client.RestoreCallCount);
+        }
+
+        [Fact]
+        public async Task CheckJob_RestoreEditThrows_JobStillRestoredOrRestoreFailed()
+        {
+            var now = new DateTime(2026, 8, 8, 12, 0, 0, DateTimeKind.Utc);
+            var client = new FakeRedownloadMediaClient { LastGrabHistoryId = 777, RestoreResult = true };
+            client.GetCurrentFile = _ => MakeFile(100); // no new file ever arrives
+            var repo = new RedownloadJobsRepository(_tempPath);
+            var messenger = new FakeRedownloadMessenger { EditThrows = new InvalidOperationException("Discord message was deleted") };
+            var logger = new FakeLogger();
+            var engine = MakeEngine(client, repo, messenger, logger, utcNow: () => now);
+            var target = MakeTarget();
+
+            var job = await engine.BeginAsync(target, 111UL, "someuser", 222UL, 30);
+
+            now = job.DeadlineUtc.AddMinutes(1);
+
+            // Must not throw: the restore succeeds, but the status-message edit fails -- state
+            // is already persisted by the time the edit is attempted, so the failure is caught
+            // and logged, not propagated.
+            await engine.CheckJobAsync(job);
+
+            Assert.Equal(RedownloadJobState.Restored, job.State);
+            Assert.Equal(1, client.RestoreCallCount);
+            Assert.Single(messenger.Edits); // the edit WAS attempted (and recorded before throwing)
+            Assert.NotEmpty(logger.Errors);
+
+            var reloaded = new RedownloadJobsRepository(_tempPath);
+            Assert.False(reloaded.HasActiveFor(target.IsMovie, target.ArrId));
+
+            // Terminal state respected: a second CheckJobAsync must not attempt a second
+            // restore, nor any further client calls.
+            var callCountAfterFirstCheck = client.Calls.Count;
+            await engine.CheckJobAsync(job);
+            Assert.Equal(1, client.RestoreCallCount);
+            Assert.Equal(callCountAfterFirstCheck, client.Calls.Count);
         }
 
         [Fact]
