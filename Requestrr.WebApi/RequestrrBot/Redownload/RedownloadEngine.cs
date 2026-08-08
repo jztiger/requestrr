@@ -86,6 +86,13 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
                 CreatedUtc = _utcNow(),
             };
 
+            // S-2: structured entry log for the destructive flow, BEFORE anything destructive has
+            // happened -- the fields here are exactly what an admin needs to correlate a Discord
+            // report ("I clicked redownload and now X is gone") back to this job.
+            _logger.LogInformation(
+                "Redownload: BeginAsync requested by {RequesterId} ({RequesterName}) for '{DisplayTitle}' (IsMovie={IsMovie}, ArrId={ArrId}, OldFileId={OldFileId}, OldFilePath={OldFilePath})",
+                requesterId, requesterName, job.DisplayTitle, job.IsMovie, job.ArrId, job.OldFileId, job.OldFilePath);
+
             var content = BuildBaseMessage(job);
             var (postedChannelId, postedMessageId) = await _messenger.PostPublicAsync(channelId, content);
             job.ChannelId = postedChannelId;
@@ -102,6 +109,7 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
             try
             {
                 await client.DeleteFileAsync(fileIdToDelete);
+                _logger.LogInformation("Redownload: deleted old file {FileId} for job {JobId} ('{DisplayTitle}')", fileIdToDelete, job.Id, job.DisplayTitle);
             }
             catch (Exception ex)
             {
@@ -113,6 +121,7 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
                 try
                 {
                     await client.MarkHistoryFailedAsync(historyId.Value);
+                    _logger.LogInformation("Redownload: blocklisted grab history {HistoryId} for job {JobId} ('{DisplayTitle}')", historyId.Value, job.Id, job.DisplayTitle);
                 }
                 catch (Exception ex)
                 {
@@ -128,6 +137,7 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
             try
             {
                 await client.TriggerSearchAsync(target);
+                _logger.LogInformation("Redownload: triggered search for job {JobId} ('{DisplayTitle}', ArrId={ArrId})", job.Id, job.DisplayTitle, job.ArrId);
             }
             catch (Exception ex)
             {
@@ -200,6 +210,8 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
             job.State = RedownloadJobState.Completed;
             _repo.Update(job);
 
+            _logger.LogInformation("Redownload: job {JobId} ('{DisplayTitle}') Completed", job.Id, job.DisplayTitle);
+
             await EditPublicSafeAsync(job, content);
         }
 
@@ -221,6 +233,8 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
             // second restore attempt.
             job.State = restored ? RedownloadJobState.Restored : RedownloadJobState.RestoreFailed;
             _repo.Update(job);
+
+            _logger.LogInformation("Redownload: job {JobId} ('{DisplayTitle}') {State}", job.Id, job.DisplayTitle, job.State);
 
             var suffix = restored
                 ? "\n↩️ Nothing better found — original restored"

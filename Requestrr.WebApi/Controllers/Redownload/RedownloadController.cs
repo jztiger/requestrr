@@ -121,6 +121,17 @@ namespace Requestrr.WebApi.Controllers.Redownload
             if (model.TimeoutMinutes < 1 || model.TimeoutMinutes > 1440)
                 return BadRequest("Timeout must be between 1 and 1440 minutes.");
 
+            var animeRootFolder = model.AnimeRootFolder?.Trim() ?? string.Empty;
+
+            // I-1: a blank AnimeRootFolder makes RedownloadResolver.IsAnime's path-based OR-rule
+            // silently no-op (see IsAnime in RedownloadResolver.cs), which fails OPEN -- an
+            // anime-rooted-but-standard-typed show (e.g. SpongeBob/He-Man) would no longer be
+            // caught by the path half of the rule and would become redownloadable again. Requiring
+            // a non-empty, absolute path here closes that at the write path; RedownloadSettingsProvider
+            // (S-1) closes the same gap at the read path for settings.json files edited by hand.
+            if (string.IsNullOrEmpty(animeRootFolder) || !animeRootFolder.StartsWith("/"))
+                return BadRequest("Anime root folder must be an absolute path (starting with '/').");
+
             SettingsFile.Write(settings =>
             {
                 settings.Redownload.Enabled = model.Enabled;
@@ -128,7 +139,7 @@ namespace Requestrr.WebApi.Controllers.Redownload
                 settings.Redownload.RecentItemsCount = model.RecentItemsCount;
                 settings.Redownload.HistoryFetchCount = model.HistoryFetchCount;
                 settings.Redownload.TimeoutMinutes = model.TimeoutMinutes;
-                settings.Redownload.AnimeRootFolder = model.AnimeRootFolder?.Trim() ?? string.Empty;
+                settings.Redownload.AnimeRootFolder = animeRootFolder;
                 settings.Redownload.AnimeSnarkUserId = model.AnimeSnarkUserId?.Trim() ?? string.Empty;
                 settings.Redownload.AnimeSkipMessage = model.AnimeSkipMessage ?? string.Empty;
 

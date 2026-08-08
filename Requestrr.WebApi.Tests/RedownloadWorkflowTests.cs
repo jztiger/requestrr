@@ -519,6 +519,40 @@ namespace Requestrr.WebApi.Tests
         }
 
         [Fact]
+        public async Task HandleConfirm_RecycleBinGateEmpty_ShowsGateMessage_DoesNotCallBeginAsync_ClearsPendingTarget()
+        {
+            // I-2: the recycle-bin gate must be re-checked at commit time, not just at list time.
+            // Simulates an admin closing the recycle bin (or an arr going empty-string) in between
+            // the confirm card being shown and the user clicking it.
+            var sonarrClient = new FakeRedownloadMediaClient { RecycleBinPath = "/bin/sonarr" };
+            var radarrClient = new FakeRedownloadMediaClient { RecycleBinPath = "" }; // gate closed
+            var repo = new RedownloadJobsRepository(_tempPath);
+            var engineMessenger = new FakeRedownloadMessenger();
+            var engine = new RedownloadEngine(_ => sonarrClient, repo, engineMessenger, NullLogger.Instance, TimeSpan.FromMinutes(5));
+
+            var settings = MakeSettings();
+            var pending = new ConcurrentDictionary<ulong, PendingRedownload>();
+            var target = new RedownloadTarget { IsMovie = false, ArrId = 42, DisplayTitle = "Some Show - S01E01" };
+            pending[111UL] = new PendingRedownload { Target = target };
+
+            var responder = new FakeResponder();
+            var workflowMessenger = new FakeRedownloadMessenger();
+            var workflow = MakeWorkflow(settings, sonarrClient, radarrClient, null, repo, engine, workflowMessenger, responder, pending);
+
+            await workflow.HandleConfirmAsync(target.ArrId);
+
+            Assert.True(responder.GateShown);
+            Assert.False(responder.StartedShown);
+            Assert.Empty(engineMessenger.Posts); // BeginAsync never called
+            Assert.Empty(repo.GetActive());
+
+            // Pending's Offered list (if any) is left alone -- only the Target is cleared, mirroring
+            // ShowRecentListAsync's ClearPendingTarget behavior on every non-committing gate path.
+            Assert.True(pending.ContainsKey(111UL));
+            Assert.Null(pending[111UL].Target);
+        }
+
+        [Fact]
         public async Task HandleConfirm_RaceAlreadyActive_ShowsInFlight_DoesNotCallBeginAsync_ClearsPending()
         {
             var target = new RedownloadTarget

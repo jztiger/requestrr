@@ -77,19 +77,21 @@ namespace Requestrr.WebApi.Tests
         }
 
         [Fact]
-        public void RedownloadSettingsProvider_returns_disabled_defaults_when_settings_file_unreadable()
+        public void RedownloadSettingsProvider_returns_full_spec_defaults_when_settings_file_unreadable()
         {
             // No settings.json exists at SettingsFile's configured path in the test environment,
-            // so Read() throws and the provider's catch-all fallback is exercised.
+            // so Read() throws and the provider's catch-all fallback is exercised. S-1: this must
+            // return the FULL spec default set (matching SettingsTemplate.json), not just a
+            // disabled flag with zeroed-out numeric fields.
             var provider = new RedownloadSettingsProvider();
 
             var settings = provider.Provide();
 
-            Assert.False(settings.Enabled);
+            AssertSpecDefaults(settings);
         }
 
         [Fact]
-        public void RedownloadSettingsProvider_returns_disabled_defaults_when_redownload_section_missing()
+        public void RedownloadSettingsProvider_returns_full_spec_defaults_when_redownload_section_missing()
         {
             // Directly exercises the redownloadSection == null branch (settings file present,
             // but no top-level "Redownload" key) rather than the exception fallback above.
@@ -100,12 +102,94 @@ namespace Requestrr.WebApi.Tests
 
                 var settings = provider.Provide();
 
-                Assert.False(settings.Enabled);
+                AssertSpecDefaults(settings);
             }
             finally
             {
                 SettingsFile._cachedSettings = null;
             }
+        }
+
+        [Fact]
+        public void RedownloadSettingsProvider_clamps_out_of_range_values_in_section()
+        {
+            // S-1: a hand-edited settings.json (or one written by an older build without the
+            // controller's bound checks) can carry out-of-range numeric fields. The read path is
+            // the last backstop before those values reach RedownloadResolver/RedownloadEngine.
+            SettingsFile._cachedSettings = JObject.Parse(@"
+            {
+              ""Redownload"": {
+                ""Enabled"": true,
+                ""CommandName"": ""redownload"",
+                ""RecentItemsCount"": 999,
+                ""HistoryFetchCount"": 0,
+                ""TimeoutMinutes"": -5,
+                ""AnimeRootFolder"": ""/data/plexmedia/Anime"",
+                ""AnimeSnarkUserId"": ""123"",
+                ""AnimeSkipMessage"": ""hi""
+              }
+            }");
+            try
+            {
+                var provider = new RedownloadSettingsProvider();
+
+                var settings = provider.Provide();
+
+                Assert.True(settings.Enabled);
+                Assert.Equal(25, settings.RecentItemsCount); // 999 clamped down to the max
+                Assert.Equal(1, settings.HistoryFetchCount); // 0 clamped up to the min
+                Assert.Equal(1, settings.TimeoutMinutes); // -5 clamped up to the min
+            }
+            finally
+            {
+                SettingsFile._cachedSettings = null;
+            }
+        }
+
+        [Fact]
+        public void RedownloadSettingsProvider_blank_AnimeRootFolder_falls_back_to_default()
+        {
+            // S-1 closes I-1's fail-open gap at the read layer: a blank AnimeRootFolder must never
+            // reach RedownloadResolver.IsAnime, whose path-based OR-rule silently no-ops on an
+            // empty root and would otherwise re-enable redownloads for anime-rooted-but-standard-
+            // typed shows (e.g. SpongeBob/He-Man, per the finding).
+            SettingsFile._cachedSettings = JObject.Parse(@"
+            {
+              ""Redownload"": {
+                ""Enabled"": true,
+                ""CommandName"": ""redownload"",
+                ""RecentItemsCount"": 5,
+                ""HistoryFetchCount"": 25,
+                ""TimeoutMinutes"": 45,
+                ""AnimeRootFolder"": ""   "",
+                ""AnimeSnarkUserId"": """",
+                ""AnimeSkipMessage"": """"
+              }
+            }");
+            try
+            {
+                var provider = new RedownloadSettingsProvider();
+
+                var settings = provider.Provide();
+
+                Assert.Equal("/data/plexmedia/Anime", settings.AnimeRootFolder);
+            }
+            finally
+            {
+                SettingsFile._cachedSettings = null;
+            }
+        }
+
+        private static void AssertSpecDefaults(RedownloadSettings settings)
+        {
+            Assert.False(settings.Enabled);
+            Assert.Equal("redownload", settings.CommandName);
+            Assert.Equal(5, settings.RecentItemsCount);
+            Assert.Equal(25, settings.HistoryFetchCount);
+            Assert.Equal(45, settings.TimeoutMinutes);
+            Assert.Equal("/data/plexmedia/Anime", settings.AnimeRootFolder);
+            Assert.Equal(string.Empty, settings.AnimeSnarkUserId);
+            Assert.Equal(AnimeSkipMessage, settings.AnimeSkipMessage);
         }
     }
 }

@@ -55,6 +55,7 @@ function Redownload(props) {
   const [timeoutMinutes, setTimeoutMinutes] = useState("45");
   const [isTimeoutMinutesValid, setIsTimeoutMinutesValid] = useState(false);
   const [animeRootFolder, setAnimeRootFolder] = useState("");
+  const [isAnimeRootFolderValid, setIsAnimeRootFolderValid] = useState(false);
   const [animeSnarkUserId, setAnimeSnarkUserId] = useState("");
   const [animeSkipMessage, setAnimeSkipMessage] = useState("");
 
@@ -89,7 +90,7 @@ function Redownload(props) {
       return;
 
     if (!isSaving) {
-      if (isCommandNameValid && isRecentItemsCountValid && isHistoryFetchCountValid && isTimeoutMinutesValid) {
+      if (isCommandNameValid && isRecentItemsCountValid && isHistoryFetchCountValid && isTimeoutMinutesValid && isAnimeRootFolderValid) {
         setIsSaving(true);
 
         dispatch(saveSettings({
@@ -163,6 +164,13 @@ function Redownload(props) {
   const validateRecentItemsCount = validateIntRange(1, 25);
   const validateHistoryFetchCount = validateIntRange(1, 200);
   const validateTimeoutMinutes = validateIntRange(1, 1440);
+
+  // I-1: mirrors the server-side check in RedownloadController.SaveAsync -- a blank
+  // AnimeRootFolder fails open in RedownloadResolver.IsAnime's path-based OR-rule, silently
+  // re-enabling redownloads for anime-rooted-but-standard-typed shows.
+  const validateAnimeRootFolder = (value) => {
+    return /\S/.test(value) && value.trim().startsWith("/");
+  };
 
 
   const onTestSettings = (e) => {
@@ -423,16 +431,16 @@ function Redownload(props) {
                   <div className="pl-lg-4">
                     <Row>
                       <Col lg="6">
-                        <FormGroup>
-                          <label className="form-control-label" htmlFor="input-AnimeRootFolder">Anime Root Folder</label>
-                          <Input
-                            value={animeRootFolder}
-                            onChange={e => setAnimeRootFolder(e.target.value)}
-                            className="form-control-alternative"
-                            id="input-AnimeRootFolder"
-                            placeholder="/data/plexmedia/Anime"
-                            type="text" />
-                        </FormGroup>
+                        <ValidatedTextbox
+                          name="Anime Root Folder"
+                          placeholder="/data/plexmedia/Anime"
+                          alertClassName="mt-3 mb-0"
+                          errorMessage="Anime root folder must be an absolute path (starting with '/')."
+                          isSubmitted={isSubmitted}
+                          value={animeRootFolder}
+                          validation={validateAnimeRootFolder}
+                          onChange={newValue => setAnimeRootFolder(newValue)}
+                          onValidate={isValid => setIsAnimeRootFolderValid(isValid)} />
                       </Col>
                       <Col lg="6">
                         <FormGroup>

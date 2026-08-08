@@ -35,7 +35,7 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload.Arr
         public async Task<SonarrSeriesInfo> FindSeriesByTvdbIdAsync(int tvdbId)
         {
             var response = await HttpGetAsync($"{BaseURL}/series?tvdbId={tvdbId}");
-            response.EnsureSuccessStatusCode();
+            await EnsureSuccessAsync(response);
 
             var json = JArray.Parse(await response.Content.ReadAsStringAsync());
             var match = json.FirstOrDefault();
@@ -46,7 +46,7 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload.Arr
         public async Task<SonarrEpisodeInfo> FindEpisodeAsync(int seriesId, int season, int episode)
         {
             var response = await HttpGetAsync($"{BaseURL}/episode?seriesId={seriesId}&seasonNumber={season}");
-            response.EnsureSuccessStatusCode();
+            await EnsureSuccessAsync(response);
 
             var json = JArray.Parse(await response.Content.ReadAsStringAsync());
             var match = json.FirstOrDefault(x => (int)x["episodeNumber"] == episode);
@@ -63,7 +63,7 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload.Arr
                 return null;
             }
 
-            response.EnsureSuccessStatusCode();
+            await EnsureSuccessAsync(response);
 
             var json = JObject.Parse(await response.Content.ReadAsStringAsync());
 
@@ -73,7 +73,7 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload.Arr
         public async Task<IReadOnlyList<SonarrSeriesInfo>> FindSeriesByTitleAsync(string title)
         {
             var response = await HttpGetAsync($"{BaseURL}/series");
-            response.EnsureSuccessStatusCode();
+            await EnsureSuccessAsync(response);
 
             var json = JArray.Parse(await response.Content.ReadAsStringAsync());
 
@@ -88,7 +88,7 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload.Arr
         public async Task<string> GetRecycleBinPathAsync()
         {
             var response = await HttpGetAsync($"{BaseURL}/config/mediamanagement");
-            response.EnsureSuccessStatusCode();
+            await EnsureSuccessAsync(response);
 
             var json = JObject.Parse(await response.Content.ReadAsStringAsync());
 
@@ -98,7 +98,7 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload.Arr
         public async Task<MediaFileInfo> GetCurrentFileAsync(RedownloadTarget t)
         {
             var episodeResponse = await HttpGetAsync($"{BaseURL}/episode/{t.ArrId}");
-            episodeResponse.EnsureSuccessStatusCode();
+            await EnsureSuccessAsync(episodeResponse);
 
             var episodeJson = JObject.Parse(await episodeResponse.Content.ReadAsStringAsync());
             var episodeFileId = (int)episodeJson["episodeFileId"];
@@ -114,7 +114,7 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload.Arr
         public async Task EnsureMonitoredAsync(RedownloadTarget t)
         {
             var response = await HttpGetAsync($"{BaseURL}/episode/{t.ArrId}");
-            response.EnsureSuccessStatusCode();
+            await EnsureSuccessAsync(response);
 
             var json = JObject.Parse(await response.Content.ReadAsStringAsync());
 
@@ -122,7 +122,7 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload.Arr
             {
                 json["monitored"] = true;
                 var putResponse = await HttpPutAsync($"{BaseURL}/episode/{t.ArrId}", json.ToString());
-                putResponse.EnsureSuccessStatusCode();
+                await EnsureSuccessAsync(putResponse);
             }
         }
 
@@ -133,7 +133,7 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload.Arr
             // appears in the JSON response body — eventType=grabbed 400s with "value is not valid",
             // eventType=1 works and returns records with eventType:"grabbed". 1 = HistoryEventType.Grabbed.
             var response = await HttpGetAsync($"{BaseURL}/history?episodeId={t.ArrId}&eventType=1&pageSize=1&sortKey=date&sortDirection=descending");
-            response.EnsureSuccessStatusCode();
+            await EnsureSuccessAsync(response);
 
             var json = JObject.Parse(await response.Content.ReadAsStringAsync());
 
@@ -143,13 +143,13 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload.Arr
         public async Task DeleteFileAsync(int fileId)
         {
             var response = await HttpDeleteAsync($"{BaseURL}/episodefile/{fileId}");
-            response.EnsureSuccessStatusCode();
+            await EnsureSuccessAsync(response);
         }
 
         public async Task MarkHistoryFailedAsync(long historyId)
         {
             var response = await HttpPostAsync($"{BaseURL}/history/failed/{historyId}", "");
-            response.EnsureSuccessStatusCode();
+            await EnsureSuccessAsync(response);
         }
 
         public async Task TriggerSearchAsync(RedownloadTarget t)
@@ -161,7 +161,7 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload.Arr
             };
 
             var response = await HttpPostAsync($"{BaseURL}/command", payload.ToString());
-            response.EnsureSuccessStatusCode();
+            await EnsureSuccessAsync(response);
         }
 
         public async Task<bool> RestoreFromRecycleBinAsync(RedownloadTarget t, string originalFileName)
@@ -174,7 +174,7 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload.Arr
             }
 
             var response = await HttpGetAsync($"{BaseURL}/manualimport?folder={Uri.EscapeDataString(recycleBin)}&filterExistingFiles=false");
-            response.EnsureSuccessStatusCode();
+            await EnsureSuccessAsync(response);
 
             var candidates = JArray.Parse(await response.Content.ReadAsStringAsync());
             var candidate = FindRecycleBinCandidate(candidates, originalFileName) as JObject;
@@ -188,7 +188,7 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload.Arr
             var payload = BuildManualImportPayload(candidate, t);
 
             var importResponse = await HttpPostAsync($"{BaseURL}/command", payload.ToString());
-            importResponse.EnsureSuccessStatusCode();
+            await EnsureSuccessAsync(importResponse);
 
             return true;
         }
@@ -291,6 +291,45 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload.Arr
                 EpisodeFileId = (int)j["episodeFileId"],
                 Monitored = (bool)j["monitored"],
             };
+        }
+
+        // ---- error handling (S-2) -------------------------------------------------------
+
+        // Replaces bare EnsureSuccessStatusCode() at every call site in this file. A destructive
+        // flow (delete-then-search) failing silently with just "500 Internal Server Error" and no
+        // body makes on-call debugging a guessing game; this reads and includes the response body
+        // (truncated) plus the request path so the arr's actual error message reaches the log line
+        // that already wraps every call site (RedownloadEngine/RedownloadWorkflow already log the
+        // exception + its Message).
+        //
+        // NOT included: the API key. It is only ever sent via the X-Api-Key header (see
+        // HttpGetAsync/HttpPostAsync/HttpPutAsync/HttpDeleteAsync below) -- never appended to the
+        // URL's query string -- so RequestUri.PathAndQuery below can never contain it.
+        private static async Task EnsureSuccessAsync(HttpResponseMessage response)
+        {
+            if (response.IsSuccessStatusCode)
+            {
+                return;
+            }
+
+            string body;
+            try
+            {
+                body = await response.Content.ReadAsStringAsync();
+            }
+            catch (Exception ex)
+            {
+                body = $"<failed to read response body: {ex.Message}>";
+            }
+
+            if (body != null && body.Length > 500)
+            {
+                body = body.Substring(0, 500) + "...(truncated)";
+            }
+
+            var urlPath = response.RequestMessage?.RequestUri?.PathAndQuery ?? "<unknown url>";
+
+            throw new HttpRequestException($"Sonarr API call failed: {(int)response.StatusCode} {response.StatusCode} at {urlPath} -- {body}");
         }
 
         // ---- HTTP plumbing (copied from the SonarrClientV4 pattern) -------------------------------------------------------

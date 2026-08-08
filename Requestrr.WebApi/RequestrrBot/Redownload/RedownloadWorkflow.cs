@@ -205,6 +205,12 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
         // trigger a second, redundant BeginAsync. Once BeginAsync has been called, Pending is
         // cleared -- a repeated HandleConfirmAsync call for this user (e.g. a duplicate component
         // event) finds nothing pending and is a silent no-op.
+        //
+        // I-2: also re-checks the recycle-bin gate on BOTH adapters immediately before committing,
+        // the same way ShowRecentListAsync does at list time. A confirm card can stay open for as
+        // long as the user leaves it -- an admin can flip the recycle bin off (or Sonarr/Radarr can
+        // go unreachable) in between list time and confirm time, and without this re-check
+        // BeginAsync would still run a delete with no safety net to restore from.
         public async Task HandleConfirmAsync(int arrId)
         {
             if (!_settings.Enabled)
@@ -220,6 +226,32 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
             if (pending.Target.ArrId != arrId)
             {
                 await _responder.ShowStaleCardAsync();
+                return;
+            }
+
+            string sonarrBin;
+            string radarrBin;
+
+            try
+            {
+                sonarrBin = await _sonarrClient.GetRecycleBinPathAsync();
+                radarrBin = await _radarrClient.GetRecycleBinPathAsync();
+            }
+            catch (Exception ex)
+            {
+                // Same degrade-to-gate-message behavior as ShowRecentListAsync: an arr going
+                // unreachable right at commit time must not leave the card silently stuck, and
+                // must not commit a destructive delete with no recycle bin to fall back on.
+                _logger.LogError(ex, "Redownload: recycle bin lookup failed at confirm: " + ex.Message);
+                pending.Target = null;
+                await _responder.ShowGateMessageAsync();
+                return;
+            }
+
+            if (string.IsNullOrEmpty(sonarrBin) || string.IsNullOrEmpty(radarrBin))
+            {
+                pending.Target = null;
+                await _responder.ShowGateMessageAsync();
                 return;
             }
 

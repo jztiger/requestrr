@@ -186,6 +186,12 @@ namespace Requestrr.WebApi.RequestrrBot
         {
             try
             {
+                if (ctx.Guild == null)
+                {
+                    await ctx.CreateResponseAsync(InteractionResponseType.ChannelMessageWithSource, new DiscordInteractionResponseBuilder().AsEphemeral(true).WithContent("/redownload only works in a server channel."));
+                    return;
+                }
+
                 await ctx.CreateResponseAsync(InteractionResponseType.ChannelMessageWithSource, new DiscordInteractionResponseBuilder().AsEphemeral(true).WithContent("Looking up recently watched..."));
                 var workFlow = _serviceProvider.Get<RedownloadWorkflowFactory>().CreateWorkflow(ctx.Interaction);
                 await workFlow.ShowRecentListAsync();
