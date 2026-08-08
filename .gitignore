@@ -9,3 +9,6 @@ Requestrr.WebApi/config/settings.json
 Requestrr.WebApi/MakeReleaseBuilds
 
 Requestrr.WebApi/MakeDockerBuilds
+
+Requestrr.WebApi.Tests/bin/
+Requestrr.WebApi.Tests/obj/

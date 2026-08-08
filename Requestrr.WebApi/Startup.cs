@@ -31,6 +31,9 @@ using System.Threading;
 using Microsoft.AspNetCore.Http.Features;
 using Requestrr.WebApi.RequestrrBot.DownloadClients.Lidarr;
 using Requestrr.WebApi.RequestrrBot.Music;
+using Requestrr.WebApi.RequestrrBot.DownloadClients.Tautulli;
+using Requestrr.WebApi.RequestrrBot.Redownload;
+using Requestrr.WebApi.RequestrrBot.Redownload.Arr;
 
 namespace Requestrr.WebApi
 {
@@ -106,6 +109,13 @@ namespace Requestrr.WebApi
             services.AddSingleton<RadarrSettingsProvider>();
             services.AddSingleton<SonarrSettingsProvider>();
             services.AddSingleton<LidarrSettingsProvider>();
+            services.AddSingleton<TautulliSettingsProvider>();
+            services.AddSingleton<RedownloadSettingsProvider>();
+            services.AddSingleton<TautulliClient>();
+            services.AddSingleton<SonarrRedownloadClient>();
+            services.AddSingleton<RadarrRedownloadClient>();
+            services.AddSingleton<RedownloadJobsRepository>();
+            services.AddSingleton<RequestrrBot.Redownload.RedownloadWorkflowFactory>();
             services.AddSingleton<RequestrrBot.ChatBot>();
         }
 

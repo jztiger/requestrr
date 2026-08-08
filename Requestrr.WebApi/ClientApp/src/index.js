@@ -39,6 +39,7 @@ import OverseerrClients from './store/reducers/OverseerrClientsReducer';
 import TvShowsClients from './store/reducers/TvShowsClientsReducer';
 import LidarrClients from "./store/reducers/LidarrClientsReducer.jsx";
 import MusicClients from "./store/reducers/MusicClientsReducer.jsx";
+import RedownloadReducer from "./store/reducers/RedownloadReducer.jsx";
 
 
 
@@ -78,6 +79,7 @@ const store = configureStore({
     movies: combinedMovieClientsReducer,
     music: combinedMusicClientsReducer,
     tvShows: combinedTvShowsClientsReducer,
+    redownload: RedownloadReducer,
     settings: SettingsReducer
   }
 });

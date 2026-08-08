@@ -19,6 +19,7 @@ using Requestrr.WebApi.RequestrrBot.DownloadClients.Ombi;
 using Requestrr.WebApi.RequestrrBot.DownloadClients.Overseerr;
 using Requestrr.WebApi.RequestrrBot.DownloadClients.Radarr;
 using Requestrr.WebApi.RequestrrBot.DownloadClients.Sonarr;
+using Requestrr.WebApi.RequestrrBot.DownloadClients.Tautulli;
 using Requestrr.WebApi.RequestrrBot.Locale;
 using Requestrr.WebApi.RequestrrBot.Movies;
 using Requestrr.WebApi.RequestrrBot.Music;
@@ -26,6 +27,7 @@ using Requestrr.WebApi.RequestrrBot.Notifications;
 using Requestrr.WebApi.RequestrrBot.Notifications.Movies;
 using Requestrr.WebApi.RequestrrBot.Notifications.Music;
 using Requestrr.WebApi.RequestrrBot.Notifications.TvShows;
+using Requestrr.WebApi.RequestrrBot.Redownload;
 using Requestrr.WebApi.RequestrrBot.TvShows;
 
 namespace Requestrr.WebApi.RequestrrBot
@@ -36,6 +38,7 @@ namespace Requestrr.WebApi.RequestrrBot
         private MovieNotificationEngine _movieNotificationEngine;
         private TvShowNotificationEngine _tvShowNotificationEngine;
         private MusicNotificationEngine _musicNotificationEngine;
+        private RedownloadEngine _redownloadEngine;
         private readonly IServiceProvider _serviceProvider;
         private readonly ILogger<ChatBot> _logger;
         private readonly DiscordSettingsProvider _discordSettingsProvider;
@@ -44,6 +47,7 @@ namespace Requestrr.WebApi.RequestrrBot
         private MovieWorkflowFactory _movieWorkflowFactory;
         private TvShowWorkflowFactory _tvShowWorkflowFactory;
         private MusicWorkflowFactory _musicWorkflowFactory;
+        private RedownloadWorkflowFactory _redownloadWorkflowFactory;
         private MovieNotificationsRepository _movieNotificationRepository = new MovieNotificationsRepository();
         private TvShowNotificationsRepository _tvShowNotificationRepository = new TvShowNotificationsRepository();
         private MusicNotificationsRepository _musicNotificationRepository = new MusicNotificationsRepository();
@@ -74,6 +78,7 @@ namespace Requestrr.WebApi.RequestrrBot
             _movieWorkflowFactory = new MovieWorkflowFactory(_discordSettingsProvider, _movieNotificationRepository, _overseerrClient, _ombiDownloadClient, _radarrDownloadClient);
             _tvShowWorkflowFactory = new TvShowWorkflowFactory(serviceProvider.Get<TvShowsSettingsProvider>(), _discordSettingsProvider, _tvShowNotificationRepository, _overseerrClient, _ombiDownloadClient, _sonarrDownloadClient);
             _musicWorkflowFactory = new MusicWorkflowFactory(_discordSettingsProvider, _musicNotificationRepository, _lidarrDownloadClient);
+            _redownloadWorkflowFactory = serviceProvider.Get<RedownloadWorkflowFactory>();
         }
 
         public async void Start()
@@ -196,6 +201,7 @@ namespace Requestrr.WebApi.RequestrrBot
                             .AddSingleton<MovieWorkflowFactory>(_movieWorkflowFactory)
                             .AddSingleton<TvShowWorkflowFactory>(_tvShowWorkflowFactory)
                             .AddSingleton<MusicWorkflowFactory>(_musicWorkflowFactory)
+                            .AddSingleton<RedownloadWorkflowFactory>(_redownloadWorkflowFactory)
                             .BuildServiceProvider()
                     });
 
@@ -239,7 +245,7 @@ namespace Requestrr.WebApi.RequestrrBot
                             var prop = _slashCommands.GetType().GetProperty("_updateList", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                             prop.SetValue(_slashCommands, new List<KeyValuePair<ulong?, Type>>());
 
-                            var slashCommandType = SlashCommandBuilder.Build(_logger, newSettings, _serviceProvider.Get<RadarrSettingsProvider>(), _serviceProvider.Get<SonarrSettingsProvider>(), _serviceProvider.Get<OverseerrSettingsProvider>(), _serviceProvider.Get<OmbiSettingsProvider>(), _serviceProvider.Get<LidarrSettingsProvider>());
+                            var slashCommandType = SlashCommandBuilder.Build(_logger, newSettings, _serviceProvider.Get<RadarrSettingsProvider>(), _serviceProvider.Get<SonarrSettingsProvider>(), _serviceProvider.Get<OverseerrSettingsProvider>(), _serviceProvider.Get<OmbiSettingsProvider>(), _serviceProvider.Get<LidarrSettingsProvider>(), _serviceProvider.Get<RedownloadSettingsProvider>(), _serviceProvider.Get<TautulliSettingsProvider>());
 
                             if (newSettings.EnableRequestsThroughDirectMessages)
                             {
@@ -387,6 +393,34 @@ namespace Requestrr.WebApi.RequestrrBot
             {
                 _logger.LogError(ex, "Error while starting music notification engine: " + ex.Message);
             }
+
+            try
+            {
+                // Deliberately NOT stopped-then-restarted here, unlike the notification engines
+                // above: those are recreated fresh every cycle (a new instance replaces the old
+                // one, so the old one's poll loop must be torn down first), but this engine is a
+                // process-lifetime SINGLETON (GetOrCreateEngine always returns the same
+                // instance). ApplyBotConfigurationAsync runs on every gateway Ready, and
+                // StopAsync can time out (5s) if it lands mid-CheckJobAsync HTTP call -- if that
+                // happened here, the immediately-following Start() would see a still-alive
+                // _pollTask and its re-entrancy guard would make it a no-op, leaving the loop
+                // dead until the NEXT Ready. Calling Start() unconditionally (never preceded by
+                // Stop) sidesteps that entirely: the guard only short-circuits a genuinely-still-
+                // running loop, which is exactly the case where no restart is needed anyway.
+                // Also NOT gated on RedownloadSettings.Enabled -- that only controls whether the
+                // /redownload command is registered (SlashCommandBuilder), not whether the
+                // engine polls; it's the only thing that can restore a deleted file once its
+                // timeout passes, so it must keep running regardless of that flag. There is
+                // currently no genuine full-teardown path in ChatBot for any engine (DisposeClient
+                // doesn't stop the movie/tv/music engines either) -- if one is added later, stop
+                // this engine there, never in this refresh path.
+                _redownloadEngine = _redownloadWorkflowFactory.GetOrCreateEngine(_client, _logger);
+                _redownloadEngine.Start();
+            }
+            catch (System.Exception ex)
+            {
+                _logger.LogError(ex, "Error while starting redownload engine: " + ex.Message);
+            }
         }
 
 
@@ -469,6 +503,19 @@ namespace Requestrr.WebApi.RequestrrBot
                     {
                         await CreateMusicNotificationWorkflow(e)
                             .AddNotificationArtistAsync(e.Id.Split("/").Skip(1).First(), e.Id.Split("/").Last());
+                    }
+                    else if (e.Id.ToLower().StartsWith("rds"))
+                    {
+                        if (e.Values != null && e.Values.Any())
+                            await _redownloadWorkflowFactory.CreateWorkflow(e).HandleSelectionAsync(int.Parse(e.Values.Single()));
+                    }
+                    else if (e.Id.ToLower().StartsWith("rdc"))
+                    {
+                        await _redownloadWorkflowFactory.CreateWorkflow(e).HandleConfirmAsync(int.Parse(e.Id.Split("/").Last()));
+                    }
+                    else if (e.Id.ToLower().StartsWith("rdx"))
+                    {
+                        await _redownloadWorkflowFactory.CreateWorkflow(e).HandleCancelAsync();
                     }
                 }
             }

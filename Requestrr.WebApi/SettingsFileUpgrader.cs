@@ -8,6 +8,8 @@ using Requestrr.WebApi.RequestrrBot.DownloadClients.Lidarr;
 using Requestrr.WebApi.RequestrrBot.DownloadClients.Overseerr;
 using Requestrr.WebApi.RequestrrBot.DownloadClients.Radarr;
 using Requestrr.WebApi.RequestrrBot.DownloadClients.Sonarr;
+using Requestrr.WebApi.RequestrrBot.DownloadClients.Tautulli;
+using Requestrr.WebApi.RequestrrBot.Redownload;
 
 namespace Requestrr.WebApi
 {
@@ -296,6 +298,26 @@ namespace Requestrr.WebApi
                 ((JObject)settingsJson["DownloadClients"]).Add("Lidarr", JToken.FromObject(lidarrBlankSettings));
                 ((JObject)settingsJson).Add("Music", JToken.FromObject(musicClient));
                 ((JObject)settingsJson.ChatClients.Discord).Add("MusicRoles", JToken.FromObject(new List<string>()));
+                File.WriteAllText(settingsFilePath, JsonConvert.SerializeObject(settingsJson));
+            }
+
+            if (settingsJson.Version.ToString().Equals("2.1.3", StringComparison.InvariantCultureIgnoreCase))
+            {
+                settingsJson.Version = "2.1.4";
+
+                ((JObject)settingsJson["DownloadClients"]).Add("Tautulli", JToken.FromObject(new TautulliSettings { Hostname = string.Empty, Port = 8181, ApiKey = string.Empty, UseSSL = false }));
+                ((JObject)settingsJson).Add("Redownload", JToken.FromObject(new RedownloadSettings
+                {
+                    Enabled = false,
+                    CommandName = "redownload",
+                    RecentItemsCount = 5,
+                    HistoryFetchCount = 25,
+                    TimeoutMinutes = 45,
+                    AnimeRootFolder = "/data/plexmedia/Anime",
+                    AnimeSnarkUserId = string.Empty,
+                    AnimeSkipMessage = "🍥 Skipped {count} anime title(s) — /redownload doesn't do anime: dual audio, a dozen fansub groups, and absolute numbering make \"grab a different one\" a coin flip. That means you, {user} 😉"
+                }));
+
                 File.WriteAllText(settingsFilePath, JsonConvert.SerializeObject(settingsJson));
             }
         }

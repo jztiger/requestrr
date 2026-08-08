@@ -11,6 +11,7 @@ using Requestrr.WebApi.RequestrrBot.Movies;
 using Requestrr.WebApi.RequestrrBot.TvShows;
 using Requestrr.WebApi.RequestrrBot.Music;
 using Requestrr.WebApi.RequestrrBot.Locale;
+using Requestrr.WebApi.RequestrrBot.Redownload;
 using System.Collections.Generic;
 
 namespace Requestrr.WebApi.RequestrrBot
@@ -176,6 +177,31 @@ namespace Requestrr.WebApi.RequestrrBot
                 _logger.LogError(ex, "Error while sending help command: " + ex.Message);
             }
         }
+
+
+        [REDOWNLOAD_COMMAND_START]
+        [SlashCommand("[REDOWNLOAD_NAME]", "Replace a bad download — pick from recently watched")]
+        [RequireChannels(new ulong[] { [REQUIRED_CHANNEL_IDS] })]
+        public async Task Redownload(InteractionContext ctx)
+        {
+            try
+            {
+                if (ctx.Guild == null)
+                {
+                    await ctx.CreateResponseAsync(InteractionResponseType.ChannelMessageWithSource, new DiscordInteractionResponseBuilder().AsEphemeral(true).WithContent("/redownload only works in a server channel."));
+                    return;
+                }
+
+                await ctx.CreateResponseAsync(InteractionResponseType.ChannelMessageWithSource, new DiscordInteractionResponseBuilder().AsEphemeral(true).WithContent("Looking up recently watched..."));
+                var workFlow = _serviceProvider.Get<RedownloadWorkflowFactory>().CreateWorkflow(ctx.Interaction);
+                await workFlow.ShowRecentListAsync();
+            }
+            catch (System.Exception ex)
+            {
+                _logger.LogError(ex, "Error in redownload command: " + ex.Message);
+            }
+        }
+        [REDOWNLOAD_COMMAND_END]
 
 
         [ISSUE_COMMAND_START]
