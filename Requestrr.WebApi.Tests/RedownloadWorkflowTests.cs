@@ -122,6 +122,7 @@ namespace Requestrr.WebApi.Tests
             public RedownloadTarget ConfirmTargetShown;
             public bool StartedShown;
             public bool CancelledShown;
+            public bool StaleCardShown;
 
             public Task ShowEmptyListAsync()
             {
@@ -171,6 +172,12 @@ namespace Requestrr.WebApi.Tests
                 CancelledShown = true;
                 return Task.CompletedTask;
             }
+
+            public Task ShowStaleCardAsync()
+            {
+                StaleCardShown = true;
+                return Task.CompletedTask;
+            }
         }
 
         private class FakeSonarrLookup : ISonarrRedownloadLookup
@@ -200,6 +207,7 @@ namespace Requestrr.WebApi.Tests
             public IReadOnlyList<WatchedItem> History = Array.Empty<WatchedItem>();
             public Dictionary<string, IReadOnlyList<string>> GuidsByRatingKey = new Dictionary<string, IReadOnlyList<string>>();
             public bool HistoryFetched;
+            public bool GuidsFetched;
             public List<string> SharedCallLog;
 
             public TestResolver(ISonarrRedownloadLookup sonarr, IRadarrRedownloadLookup radarr, RedownloadResolverOptions options)
@@ -216,6 +224,7 @@ namespace Requestrr.WebApi.Tests
 
             protected override Task<IReadOnlyList<string>> FetchGuidsAsync(string ratingKey)
             {
+                GuidsFetched = true;
                 return Task.FromResult(GuidsByRatingKey.TryGetValue(ratingKey, out var guids) ? guids : Array.Empty<string>());
             }
         }
@@ -376,7 +385,7 @@ namespace Requestrr.WebApi.Tests
             var workflowMessenger = new FakeRedownloadMessenger();
             var workflow1 = MakeWorkflow(settings, client, client, null, repo, engine, workflowMessenger, responder, pending);
 
-            await workflow1.HandleConfirmAsync();
+            await workflow1.HandleConfirmAsync(target.ArrId);
 
             Assert.Single(engineMessenger.Posts); // BeginAsync's own public post, exactly once
             Assert.True(responder.StartedShown);
@@ -389,11 +398,124 @@ namespace Requestrr.WebApi.Tests
             var responder2 = new FakeResponder();
             var workflow2 = MakeWorkflow(settings, client, client, null, repo, engine, workflowMessenger, responder2, pending);
 
-            await workflow2.HandleConfirmAsync();
+            await workflow2.HandleConfirmAsync(target.ArrId);
 
             Assert.Single(engineMessenger.Posts); // still just once
             Assert.Single(repo.GetActive());
             Assert.False(responder2.StartedShown);
+        }
+
+        [Fact]
+        public async Task HandleConfirm_NoPendingEntry_SilentNoOp_NoThrow()
+        {
+            var client = new FakeRedownloadMediaClient();
+            var repo = new RedownloadJobsRepository(_tempPath);
+            var engineMessenger = new FakeRedownloadMessenger();
+            var engine = new RedownloadEngine(_ => client, repo, engineMessenger, NullLogger.Instance, TimeSpan.FromMinutes(5));
+
+            var settings = MakeSettings();
+            var pending = new ConcurrentDictionary<ulong, PendingRedownload>(); // nothing seeded for 111UL
+            var responder = new FakeResponder();
+            var workflowMessenger = new FakeRedownloadMessenger();
+            var workflow = MakeWorkflow(settings, client, client, null, repo, engine, workflowMessenger, responder, pending);
+
+            await workflow.HandleConfirmAsync(42);
+
+            Assert.Empty(engineMessenger.Posts);
+            Assert.False(responder.StartedShown);
+            Assert.False(responder.StaleCardShown);
+        }
+
+        [Fact]
+        public async Task HandleConfirm_ArrIdMismatch_StaleCard_DoesNotCallBeginAsync()
+        {
+            // Simulates: user opened a confirm card for item A (ArrId 42), then made a NEW
+            // selection (item B, ArrId 99) which overwrote pending.Target -- then clicked the
+            // OLD card for A. The button's own arrId (42) no longer matches pending.Target.ArrId
+            // (99), so this must be treated as stale, not actioned against B.
+            var client = new FakeRedownloadMediaClient();
+            var repo = new RedownloadJobsRepository(_tempPath);
+            var engineMessenger = new FakeRedownloadMessenger();
+            var engine = new RedownloadEngine(_ => client, repo, engineMessenger, NullLogger.Instance, TimeSpan.FromMinutes(5));
+
+            var settings = MakeSettings();
+            var pending = new ConcurrentDictionary<ulong, PendingRedownload>();
+            var currentTarget = new RedownloadTarget { IsMovie = false, ArrId = 99, DisplayTitle = "Item B" };
+            pending[111UL] = new PendingRedownload { Target = currentTarget };
+
+            var responder = new FakeResponder();
+            var workflowMessenger = new FakeRedownloadMessenger();
+            var workflow = MakeWorkflow(settings, client, client, null, repo, engine, workflowMessenger, responder, pending);
+
+            await workflow.HandleConfirmAsync(42); // the OLD card's arrId, not the current target's
+
+            Assert.True(responder.StaleCardShown);
+            Assert.False(responder.StartedShown);
+            Assert.Empty(engineMessenger.Posts);
+
+            // The (still valid) pending target for B is untouched -- clicking the CURRENT card
+            // should still work.
+            Assert.True(pending.ContainsKey(111UL));
+            Assert.Same(currentTarget, pending[111UL].Target);
+
+            await workflow.HandleConfirmAsync(99); // the current card's arrId -- matches
+
+            Assert.True(responder.StartedShown);
+            Assert.Single(engineMessenger.Posts);
+            Assert.False(pending.ContainsKey(111UL));
+        }
+
+        [Fact]
+        public async Task HandleConfirm_Disabled_DoesNotCallBeginAsync()
+        {
+            var client = new FakeRedownloadMediaClient();
+            var repo = new RedownloadJobsRepository(_tempPath);
+            var engineMessenger = new FakeRedownloadMessenger();
+            var engine = new RedownloadEngine(_ => client, repo, engineMessenger, NullLogger.Instance, TimeSpan.FromMinutes(5));
+
+            var settings = MakeSettings(enabled: false);
+            var pending = new ConcurrentDictionary<ulong, PendingRedownload>();
+            var target = new RedownloadTarget { IsMovie = false, ArrId = 42, DisplayTitle = "Some Show - S01E01" };
+            pending[111UL] = new PendingRedownload { Target = target };
+
+            var responder = new FakeResponder();
+            var workflowMessenger = new FakeRedownloadMessenger();
+            var workflow = MakeWorkflow(settings, client, client, null, repo, engine, workflowMessenger, responder, pending);
+
+            await workflow.HandleConfirmAsync(42);
+
+            Assert.Empty(engineMessenger.Posts); // BeginAsync never called: the kill switch disarms an open card
+            Assert.False(responder.StartedShown);
+            Assert.False(responder.StaleCardShown);
+
+            // An admin flipping Enabled off mid-flow shouldn't destroy the user's pending
+            // selection either -- just refuse to act on it until re-enabled.
+            Assert.True(pending.ContainsKey(111UL));
+        }
+
+        [Fact]
+        public async Task HandleSelection_Disabled_DoesNotResolveOrShowConfirm()
+        {
+            var sonarrClient = new FakeRedownloadMediaClient { RecycleBinPath = "/bin/sonarr" };
+            var radarrClient = new FakeRedownloadMediaClient { RecycleBinPath = "/bin/radarr" };
+            var options = new RedownloadResolverOptions { RecentItemsCount = 5, HistoryFetchCount = 25, AnimeRootFolder = "/anime" };
+            var resolver = new TestResolver(new FakeSonarrLookup(), new FakeRadarrLookup(), options);
+            var repo = new RedownloadJobsRepository(_tempPath);
+            var messenger = new FakeRedownloadMessenger();
+            var responder = new FakeResponder();
+            var pending = new ConcurrentDictionary<ulong, PendingRedownload>();
+            pending[111UL] = new PendingRedownload
+            {
+                Offered = new[] { new WatchedItem { RatingKey = "m1", IsMovie = true, Title = "Movie One", Year = 2020 } },
+            };
+            var settings = MakeSettings(enabled: false);
+            var workflow = MakeWorkflow(settings, sonarrClient, radarrClient, resolver, repo, null, messenger, responder, pending);
+
+            await workflow.HandleSelectionAsync(0);
+
+            Assert.False(resolver.GuidsFetched); // ResolveTargetAsync never ran either
+            Assert.Null(responder.ConfirmTargetShown);
+            Assert.Null(responder.ResolveErrorShown);
         }
 
         [Fact]
@@ -435,7 +557,7 @@ namespace Requestrr.WebApi.Tests
             var settings = MakeSettings();
             var workflow = MakeWorkflow(settings, client, client, null, repo, engine, workflowMessenger, responder, pending);
 
-            await workflow.HandleConfirmAsync();
+            await workflow.HandleConfirmAsync(target.ArrId);
 
             Assert.Equal("Some Show - S01E01", responder.InFlightTitleShown);
             Assert.False(responder.StartedShown);
@@ -495,7 +617,7 @@ namespace Requestrr.WebApi.Tests
 
             var responder3 = new FakeResponder();
             var workflow3 = MakeWorkflow(settings, sonarrClient, radarrClient, resolver, repo, engine, new FakeRedownloadMessenger(), responder3, pending);
-            await workflow3.HandleConfirmAsync();
+            await workflow3.HandleConfirmAsync(responder2.ConfirmTargetShown.ArrId);
 
             Assert.True(responder3.StartedShown);
             Assert.Single(engineMessenger.Posts);

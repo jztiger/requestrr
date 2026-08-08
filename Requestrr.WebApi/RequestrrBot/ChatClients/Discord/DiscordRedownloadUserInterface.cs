@@ -70,7 +70,9 @@ namespace Requestrr.WebApi.RequestrrBot.ChatClients.Discord
                           $"Current file: **{target.Quality} · {sizeGb.ToString("F1", CultureInfo.InvariantCulture)} GB · {target.ReleaseGroup}**\n" +
                           "This deletes it, blocks that release from coming back, and searches for a different one.";
 
-            var replaceButton = new DiscordButtonComponent(ButtonStyle.Danger, $"RDC/{_interactionContext.User.Id}", "Replace");
+            // arrId is carried on the button itself so a stale card (issued for a different
+            // selection than the one currently pending) can be detected by RedownloadWorkflow.
+            var replaceButton = new DiscordButtonComponent(ButtonStyle.Danger, $"RDC/{_interactionContext.User.Id}/{target.ArrId}", "Replace");
             var cancelButton = new DiscordButtonComponent(ButtonStyle.Secondary, $"RDX/{_interactionContext.User.Id}", "Cancel");
 
             await _interactionContext.EditOriginalResponseAsync(
@@ -87,6 +89,12 @@ namespace Requestrr.WebApi.RequestrrBot.ChatClients.Discord
         {
             await _interactionContext.EditOriginalResponseAsync(
                 new DiscordWebhookBuilder().WithContent("Cancelled."));
+        }
+
+        public async Task ShowStaleCardAsync()
+        {
+            await _interactionContext.EditOriginalResponseAsync(
+                new DiscordWebhookBuilder().WithContent("This card is out of date — run /redownload again."));
         }
 
         private static string LimitStringSize(string value, int limit = 100)

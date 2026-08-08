@@ -23,6 +23,7 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
         Task ShowConfirmAsync(RedownloadTarget target);
         Task ShowStartedAsync();
         Task ShowCancelledAsync();
+        Task ShowStaleCardAsync();
     }
 
     // One instance per interaction (slash-command invocation, or a select/button continuation
@@ -105,12 +106,19 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
                 // watched..." forever -- degrade to the same gate message a genuinely unset
                 // recycle bin would produce.
                 _logger.LogError(ex, "Redownload: recycle bin lookup failed: " + ex.Message);
+                ClearPendingTarget();
                 await _responder.ShowGateMessageAsync();
                 return;
             }
 
             if (string.IsNullOrEmpty(sonarrBin) || string.IsNullOrEmpty(radarrBin))
             {
+                // The gate closing invalidates any confirm card issued from an earlier, still-
+                // open invocation: without this, an old RDC/{userId}/{arrId} button whose arrId
+                // still happens to match a leftover pending.Target would sail past the
+                // HandleConfirmAsync staleness check even though the feature (or at least the
+                // recycle bin) is no longer configured.
+                ClearPendingTarget();
                 await _responder.ShowGateMessageAsync();
                 return;
             }
@@ -124,6 +132,7 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
             }
             else
             {
+                ClearPendingTarget();
                 await _responder.ShowEmptyListAsync();
             }
 
@@ -142,9 +151,17 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
             }
         }
 
-        // RDS continuation: user picked an index out of the list offered at list time.
+        // RDS continuation: user picked an index out of the list offered at list time. Re-checks
+        // Enabled: an open list/card must not still be actionable after an admin disables the
+        // feature -- component routing outlives command (un)registration, so this is the only
+        // place that stops it.
         public async Task HandleSelectionAsync(int index)
         {
+            if (!_settings.Enabled)
+            {
+                return;
+            }
+
             if (!_pending.TryGetValue(_userId, out var pending) || pending.Offered == null
                 || index < 0 || index >= pending.Offered.Count)
             {
@@ -156,12 +173,16 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
 
             if (result.Error != null)
             {
+                // A resolve failure for THIS selection must not leave a PREVIOUS selection's
+                // still-valid-looking Target (and its still-clickable confirm card) behind.
+                pending.Target = null;
                 await _responder.ShowResolveErrorAsync(item.Display, result.Error);
                 return;
             }
 
             if (_repo.HasActiveFor(result.Target.IsMovie, result.Target.ArrId))
             {
+                pending.Target = null;
                 await _responder.ShowInFlightAsync(result.Target.DisplayTitle);
                 return;
             }
@@ -171,16 +192,34 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
             await _responder.ShowConfirmAsync(result.Target);
         }
 
-        // RDC continuation. Re-checks HasActiveFor immediately before committing -- closes the
-        // race where a second confirmation for the same underlying arr item (a different
-        // Discord session, or a double-click that got through before the first commit cleared
-        // Pending) would otherwise trigger a second, redundant BeginAsync. Once BeginAsync has
-        // been called, Pending is cleared -- a repeated HandleConfirmAsync call for this user
-        // (e.g. a duplicate component event) finds nothing pending and is a silent no-op.
-        public async Task HandleConfirmAsync()
+        // RDC continuation. arrId comes from the confirm button's own custom id
+        // (RDC/{userId}/{arrId}), captured at the moment that specific card was rendered. A user
+        // can have selected a DIFFERENT item since that card was shown (pending.Target now points
+        // at item B while an older, still-open card for item A is clicked) -- comparing arrId
+        // against the CURRENT pending.Target.ArrId catches that: a mismatch means this card is
+        // stale and must not be actioned, or the engine would delete B's file while every message
+        // on screen still describes A. Also re-checks Enabled (see HandleSelectionAsync) and
+        // re-checks HasActiveFor immediately before committing -- closes the race where a second
+        // confirmation for the same underlying arr item (a different Discord session, or a
+        // double-click that got through before the first commit cleared Pending) would otherwise
+        // trigger a second, redundant BeginAsync. Once BeginAsync has been called, Pending is
+        // cleared -- a repeated HandleConfirmAsync call for this user (e.g. a duplicate component
+        // event) finds nothing pending and is a silent no-op.
+        public async Task HandleConfirmAsync(int arrId)
         {
+            if (!_settings.Enabled)
+            {
+                return;
+            }
+
             if (!_pending.TryGetValue(_userId, out var pending) || pending.Target == null)
             {
+                return;
+            }
+
+            if (pending.Target.ArrId != arrId)
+            {
+                await _responder.ShowStaleCardAsync();
                 return;
             }
 
@@ -202,6 +241,19 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
         {
             _pending.TryRemove(_userId, out _);
             await _responder.ShowCancelledAsync();
+        }
+
+        // Drops just the Target off an existing Pending entry for this user, if one exists,
+        // leaving Offered (the dropdown's own backing list) intact. Called from every
+        // ShowRecentListAsync path that doesn't itself set a fresh Target, so a stale confirm
+        // card issued before this call can never be actioned against a state the user has since
+        // moved past (gate closed, list came back empty).
+        private void ClearPendingTarget()
+        {
+            if (_pending.TryGetValue(_userId, out var pending))
+            {
+                pending.Target = null;
+            }
         }
     }
 }

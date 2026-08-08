@@ -396,20 +396,24 @@ namespace Requestrr.WebApi.RequestrrBot
 
             try
             {
-                if (_redownloadEngine != null)
-                {
-                    await _redownloadEngine.StopAsync();
-                }
-
-                // Unlike the notification engines above, creating/starting this is NOT gated on
-                // a "download client disabled" style setting: RedownloadSettings.Enabled only
-                // controls whether the /redownload command is registered (SlashCommandBuilder),
-                // not whether the engine polls. It must keep running regardless of that flag --
-                // it's the only thing that can restore a deleted file once its timeout passes.
-                // GetOrCreateEngine always returns the same singleton, so this stop/start cycle
-                // (mirroring the notification engines' shape above) never loses the jobs
-                // repository or the in-flight-restore guard; Start() mints a fresh
-                // CancellationTokenSource each time it's called after a real stop.
+                // Deliberately NOT stopped-then-restarted here, unlike the notification engines
+                // above: those are recreated fresh every cycle (a new instance replaces the old
+                // one, so the old one's poll loop must be torn down first), but this engine is a
+                // process-lifetime SINGLETON (GetOrCreateEngine always returns the same
+                // instance). ApplyBotConfigurationAsync runs on every gateway Ready, and
+                // StopAsync can time out (5s) if it lands mid-CheckJobAsync HTTP call -- if that
+                // happened here, the immediately-following Start() would see a still-alive
+                // _pollTask and its re-entrancy guard would make it a no-op, leaving the loop
+                // dead until the NEXT Ready. Calling Start() unconditionally (never preceded by
+                // Stop) sidesteps that entirely: the guard only short-circuits a genuinely-still-
+                // running loop, which is exactly the case where no restart is needed anyway.
+                // Also NOT gated on RedownloadSettings.Enabled -- that only controls whether the
+                // /redownload command is registered (SlashCommandBuilder), not whether the
+                // engine polls; it's the only thing that can restore a deleted file once its
+                // timeout passes, so it must keep running regardless of that flag. There is
+                // currently no genuine full-teardown path in ChatBot for any engine (DisposeClient
+                // doesn't stop the movie/tv/music engines either) -- if one is added later, stop
+                // this engine there, never in this refresh path.
                 _redownloadEngine = _redownloadWorkflowFactory.GetOrCreateEngine(_client, _logger);
                 _redownloadEngine.Start();
             }
@@ -507,7 +511,7 @@ namespace Requestrr.WebApi.RequestrrBot
                     }
                     else if (e.Id.ToLower().StartsWith("rdc"))
                     {
-                        await _redownloadWorkflowFactory.CreateWorkflow(e).HandleConfirmAsync();
+                        await _redownloadWorkflowFactory.CreateWorkflow(e).HandleConfirmAsync(int.Parse(e.Id.Split("/").Last()));
                     }
                     else if (e.Id.ToLower().StartsWith("rdx"))
                     {
