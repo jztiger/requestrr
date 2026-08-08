@@ -9,6 +9,14 @@
     <ApplicationIcon>favicon.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Lets Requestrr.WebApi.Tests reach the internal Pending/ClientSelector seams on
+         RedownloadWorkflowFactory (pre-confirm state and the client-selector Func), which
+         RedownloadWorkflowTests inspects directly rather than through the public API. -->
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>Requestrr.WebApi.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="6.0.33" />
     <PackageReference Include="Microsoft.AspNetCore.SpaServices.Extensions" Version="6.0.33" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.0.2" />

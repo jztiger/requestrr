@@ -115,6 +115,7 @@ namespace Requestrr.WebApi
             services.AddSingleton<SonarrRedownloadClient>();
             services.AddSingleton<RadarrRedownloadClient>();
             services.AddSingleton<RedownloadJobsRepository>();
+            services.AddSingleton<RequestrrBot.Redownload.RedownloadWorkflowFactory>();
             services.AddSingleton<RequestrrBot.ChatBot>();
         }
 

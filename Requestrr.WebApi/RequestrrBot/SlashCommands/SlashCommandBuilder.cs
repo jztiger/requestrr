@@ -19,7 +19,9 @@ using Requestrr.WebApi.RequestrrBot.DownloadClients.Ombi;
 using Requestrr.WebApi.RequestrrBot.DownloadClients.Overseerr;
 using Requestrr.WebApi.RequestrrBot.DownloadClients.Radarr;
 using Requestrr.WebApi.RequestrrBot.DownloadClients.Sonarr;
+using Requestrr.WebApi.RequestrrBot.DownloadClients.Tautulli;
 using Requestrr.WebApi.RequestrrBot.Locale;
+using Requestrr.WebApi.RequestrrBot.Redownload;
 
 namespace Requestrr.WebApi.RequestrrBot
 {
@@ -27,7 +29,7 @@ namespace Requestrr.WebApi.RequestrrBot
     {
         public enum CommandType
         {
-            Misc, Movie, Tv, IssueMovie, IssueTv, Music
+            Misc, Movie, Tv, IssueMovie, IssueTv, Music, Redownload
         }
 
         private static Dictionary<CommandType, List<string>> _commandList = new Dictionary<CommandType, List<string>>();
@@ -39,9 +41,9 @@ namespace Requestrr.WebApi.RequestrrBot
 
         public static Dictionary<CommandType, List<string>> CommandList { get => _commandList; }
 
-        public static Type Build(ILogger logger, DiscordSettings settings, RadarrSettingsProvider radarrSettingsProvider, SonarrSettingsProvider sonarrSettingsProvider, OverseerrSettingsProvider overseerrSettingsProvider, OmbiSettingsProvider ombiSettingsProvider, LidarrSettingsProvider lidarrSettingsProvider)
+        public static Type Build(ILogger logger, DiscordSettings settings, RadarrSettingsProvider radarrSettingsProvider, SonarrSettingsProvider sonarrSettingsProvider, OverseerrSettingsProvider overseerrSettingsProvider, OmbiSettingsProvider ombiSettingsProvider, LidarrSettingsProvider lidarrSettingsProvider, RedownloadSettingsProvider redownloadSettingsProvider, TautulliSettingsProvider tautulliSettingsProvider)
         {
-            string code = GetCode(settings, radarrSettingsProvider.Provide(), sonarrSettingsProvider.Provide(), overseerrSettingsProvider.Provide(), ombiSettingsProvider.Provide(), lidarrSettingsProvider.Provider());
+            string code = GetCode(settings, radarrSettingsProvider.Provide(), sonarrSettingsProvider.Provide(), overseerrSettingsProvider.Provide(), ombiSettingsProvider.Provide(), lidarrSettingsProvider.Provider(), redownloadSettingsProvider.Provide(), tautulliSettingsProvider.Provide());
             var tree = SyntaxFactory.ParseSyntaxTree(code);
             string fileName = $"{DLLFileName}-{Guid.NewGuid()}.dll";
 
@@ -97,7 +99,7 @@ namespace Requestrr.WebApi.RequestrrBot
             throw new Exception("Failed to build SlashCommands assembly.");
         }
 
-        private static string GetCode(DiscordSettings settings, RadarrSettings radarrSettings, SonarrSettings sonarrSettings, OverseerrSettings overseerrSettings, OmbiSettings ombiSettings, LidarrSettings lidarrSettings)
+        private static string GetCode(DiscordSettings settings, RadarrSettings radarrSettings, SonarrSettings sonarrSettings, OverseerrSettings overseerrSettings, OmbiSettings ombiSettings, LidarrSettings lidarrSettings, RedownloadSettings redownloadSettings, TautulliSettings tautulliSettings)
         {
             //Build a list of commands being created
             _commandList = new Dictionary<CommandType, List<string>>
@@ -107,6 +109,7 @@ namespace Requestrr.WebApi.RequestrrBot
                 { CommandType.IssueMovie, new List<string>() },
                 { CommandType.IssueTv, new List<string>() },
                 { CommandType.Music, new List<string>() },
+                { CommandType.Redownload, new List<string>() },
                 { CommandType.Misc, new List<string>() }
             };
             var code = File.ReadAllText(Program.CombindPath("SlashCommands.txt"));
@@ -262,6 +265,26 @@ namespace Requestrr.WebApi.RequestrrBot
 
                 code = code.Replace("[REQUEST_COMMAND_START]", string.Empty);
                 code = code.Replace("[REQUEST_COMMAND_END]", string.Empty);
+            }
+
+            //Handle the removal of the /redownload command if disabled, Tautulli isn't
+            //configured, or no command name has been set (an empty [SlashCommand("", ...)]
+            //would otherwise reach Discord registration / the duplicate-name check below).
+            if (redownloadSettings.Enabled && !string.IsNullOrWhiteSpace(tautulliSettings.Hostname) && !string.IsNullOrWhiteSpace(redownloadSettings.CommandName))
+            {
+                _commandList[CommandType.Redownload].Add(redownloadSettings.CommandName);
+
+                code = code.Replace("[REDOWNLOAD_NAME]", redownloadSettings.CommandName);
+                code = code.Replace("[REDOWNLOAD_COMMAND_START]", string.Empty);
+                code = code.Replace("[REDOWNLOAD_COMMAND_END]", string.Empty);
+            }
+            else
+            {
+                var beginIndex = code.IndexOf("[REDOWNLOAD_COMMAND_START]");
+                var endIndex = code.IndexOf("[REDOWNLOAD_COMMAND_END]") + "[REDOWNLOAD_COMMAND_END]".Length;
+
+                code = code.Replace(code.Substring(beginIndex, endIndex - beginIndex), string.Empty);
+                _commandList.Remove(CommandType.Redownload);
             }
 
 
