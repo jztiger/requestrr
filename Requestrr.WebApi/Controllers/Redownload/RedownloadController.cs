@@ -3,8 +3,10 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Requestrr.WebApi.RequestrrBot;
 using Requestrr.WebApi.RequestrrBot.DownloadClients.Tautulli;
+using Requestrr.WebApi.RequestrrBot.Locale;
 using Requestrr.WebApi.RequestrrBot.Redownload;
 using System;
+using System.Collections.Generic;
 using System.Net.Http;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -107,6 +109,9 @@ namespace Requestrr.WebApi.Controllers.Redownload
             if (!CommandNamePattern.IsMatch(commandName))
                 return BadRequest("Command name must be 1-32 characters, using only lowercase letters, numbers, dashes and underscores.");
 
+            if (GetReservedCommandNames().Contains(commandName))
+                return BadRequest($"CommandName '{commandName}' collides with an existing command.");
+
             if (model.RecentItemsCount < 1 || model.RecentItemsCount > 25)
                 return BadRequest("Recent items count must be between 1 and 25.");
 
@@ -134,6 +139,39 @@ namespace Requestrr.WebApi.Controllers.Redownload
             });
 
             return Ok(new { ok = true });
+        }
+
+
+
+        /// <summary>
+        /// Top-level Discord command/group names that already occupy the bot's top-level
+        /// slash-command namespace, resolved the same way SlashCommandBuilder resolves them
+        /// (see SlashCommandBuilder.GetCode / SlashCommands.txt): the ping and help commands
+        /// are bare top-level [SlashCommand]s, and the request/issue groups are top-level
+        /// [SlashCommandGroup]s. /redownload is also registered bare top-level, so a
+        /// CommandName matching any of these makes SlashCommandBuilder throw
+        /// "Duplicate Slash Commands detected" on the bot's next settings poll, taking the
+        /// bot offline until an admin edits the name back.
+        /// Falls back to the hardcoded English defaults if Language.Current hasn't been
+        /// initialized yet in this context (it's set at startup in Program.cs, so this should
+        /// not normally happen, but controller code shouldn't assume it).
+        /// </summary>
+        private static HashSet<string> GetReservedCommandNames()
+        {
+            var language = Language.Current;
+
+            string help = language?.DiscordCommandHelpRequestName;
+            string ping = language?.DiscordCommandPingRequestName;
+            string requestGroup = language?.DiscordCommandRequestGroupName;
+            string issueGroup = language?.DiscordCommandIssueName;
+
+            return new HashSet<string>(new[]
+            {
+                string.IsNullOrWhiteSpace(help) ? "help" : help,
+                string.IsNullOrWhiteSpace(ping) ? "ping" : ping,
+                string.IsNullOrWhiteSpace(requestGroup) ? "request" : requestGroup,
+                string.IsNullOrWhiteSpace(issueGroup) ? "issue" : issueGroup,
+            }, StringComparer.OrdinalIgnoreCase);
         }
     }
 }

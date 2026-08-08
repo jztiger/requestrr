@@ -142,8 +142,14 @@ function Redownload(props) {
     return /^([0-9]{1,4}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$/.test(value);
   };
 
+  // Mirrors the server-side reserved-name check in RedownloadController: these are the
+  // English defaults for the bot's other top-level commands/groups (ping, help, request,
+  // issue). The server resolves these from Language.Current so a non-English locale is
+  // covered there even though this client-side check is hardcoded.
+  const RESERVED_COMMAND_NAMES = ["help", "ping", "request", "issue"];
+
   const validateCommandName = (value) => {
-    return /^[a-z0-9_-]{1,32}$/.test(value);
+    return /^[a-z0-9_-]{1,32}$/.test(value) && !RESERVED_COMMAND_NAMES.includes(value.toLowerCase());
   };
 
   const validateIntRange = (min, max) => (value) => {
@@ -254,7 +260,7 @@ function Redownload(props) {
                           name="Command Name"
                           placeholder="redownload"
                           alertClassName="mt-3 mb-0"
-                          errorMessage="Must be 1-32 characters: lowercase letters, numbers, dashes and underscores only."
+                          errorMessage="Must be 1-32 characters (lowercase letters, numbers, dashes and underscores only) and not collide with an existing command (help, ping, request, issue)."
                           isSubmitted={isSubmitted}
                           value={commandName}
                           validation={validateCommandName}
