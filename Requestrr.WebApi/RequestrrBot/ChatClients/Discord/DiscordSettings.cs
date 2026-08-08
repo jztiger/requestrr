@@ -18,6 +18,7 @@ namespace Requestrr.WebApi.RequestrrBot.ChatClients.Discord
         public int TvShowDownloadClientConfigurationHash { get; set; }
         public string MusicDownloadClient { get; set; }
         public int MusicDownloadClientConfigurationHash { get; set; }
+        public int RedownloadConfigurationHash { get; set; }
         public bool EnableRequestsThroughDirectMessages { get; set; }
         public bool AutomaticallyNotifyRequesters { get; set; }
         public string NotificationMode { get; set; }
@@ -40,6 +41,7 @@ namespace Requestrr.WebApi.RequestrrBot.ChatClients.Discord
                    TvShowDownloadClientConfigurationHash == settings.TvShowDownloadClientConfigurationHash &&
                    MusicDownloadClient == settings.MusicDownloadClient &&
                    MusicDownloadClientConfigurationHash == settings.MusicDownloadClientConfigurationHash &&
+                   RedownloadConfigurationHash == settings.RedownloadConfigurationHash &&
                    EnableRequestsThroughDirectMessages == settings.EnableRequestsThroughDirectMessages &&
                    AutomaticallyNotifyRequesters == settings.AutomaticallyNotifyRequesters &&
                    NotificationMode == settings.NotificationMode &&
@@ -63,6 +65,7 @@ namespace Requestrr.WebApi.RequestrrBot.ChatClients.Discord
             hash.Add(TvShowDownloadClientConfigurationHash);
             hash.Add(MusicDownloadClient);
             hash.Add(MusicDownloadClientConfigurationHash);
+            hash.Add(RedownloadConfigurationHash);
             hash.Add(EnableRequestsThroughDirectMessages);
             hash.Add(AutomaticallyNotifyRequesters);
             hash.Add(NotificationMode);

@@ -7,7 +7,9 @@ using Requestrr.WebApi.RequestrrBot.DownloadClients.Ombi;
 using Requestrr.WebApi.RequestrrBot.DownloadClients.Overseerr;
 using Requestrr.WebApi.RequestrrBot.DownloadClients.Radarr;
 using Requestrr.WebApi.RequestrrBot.DownloadClients.Sonarr;
+using Requestrr.WebApi.RequestrrBot.DownloadClients.Tautulli;
 using Requestrr.WebApi.RequestrrBot.Extensions;
+using Requestrr.WebApi.RequestrrBot.Redownload;
 
 namespace Requestrr.WebApi.RequestrrBot.ChatClients.Discord
 {
@@ -26,6 +28,7 @@ namespace Requestrr.WebApi.RequestrrBot.ChatClients.Discord
                 TvShowDownloadClientConfigurationHash = ComputeTvClientConfigurationHashCode(settings),
                 MusicDownloadClient = settings.Music.Client,
                 MusicDownloadClientConfigurationHash = ComputeMusicClientConfigurationHashCode(settings),
+                RedownloadConfigurationHash = ComputeRedownloadConfigurationHashCode(),
                 StatusMessage = settings.ChatClients.Discord.StatusMessage,
                 MonitoredChannels = settings.ChatClients.Discord.MonitoredChannels.ToObject<string[]>(),
                 TvShowRoles = settings.ChatClients.Discord.TvShowRoles.ToObject<string[]>(),
@@ -148,6 +151,27 @@ namespace Requestrr.WebApi.RequestrrBot.ChatClients.Discord
                 hash.Add(clientSettings.UseSSL);
                 hash.Add(clientSettings.Version);
             }
+
+            return hash.ToHashCode();
+        }
+
+
+        /// <summary>
+        /// Hashes the subset of Redownload/Tautulli settings that SlashCommandBuilder bakes
+        /// into the generated slash-command type (whether /redownload is registered and its
+        /// command name). Other Redownload fields (counts, timeout, anime handling) are read
+        /// live at execution time and don't require a bot restart to take effect.
+        /// </summary>
+        public int ComputeRedownloadConfigurationHashCode()
+        {
+            HashCode hash = new HashCode();
+
+            RedownloadSettings redownloadSettings = new RedownloadSettingsProvider().Provide();
+            TautulliSettings tautulliSettings = new TautulliSettingsProvider().Provide();
+
+            hash.Add(redownloadSettings.Enabled);
+            hash.Add(redownloadSettings.CommandName);
+            hash.Add(tautulliSettings.Hostname);
 
             return hash.ToHashCode();
         }
