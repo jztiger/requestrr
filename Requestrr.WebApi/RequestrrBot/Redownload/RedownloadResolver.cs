@@ -117,11 +117,34 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
         {
             var guids = await FetchGuidsAsync(item.RatingKey);
             var tmdbId = ExtractId(guids, "tmdb");
-            var movie = tmdbId.HasValue ? await _radarr.FindMovieByTmdbIdAsync(tmdbId.Value) : null;
+            RadarrMovieInfo movie;
 
-            if (movie == null)
+            if (tmdbId.HasValue)
             {
-                return new ResolveResult { Error = NotManagedError };
+                movie = await _radarr.FindMovieByTmdbIdAsync(tmdbId.Value);
+
+                if (movie == null)
+                {
+                    return new ResolveResult { Error = NotManagedError };
+                }
+            }
+            else
+            {
+                // No usable tmdb GUID (old metadata agent) — fall back to a title+year lookup in
+                // Radarr's own library. 0 matches → not managed, 2+ → ambiguous, stop either way.
+                var matches = await _radarr.FindMoviesByTitleYearAsync(item.Title, item.Year);
+
+                if (matches == null || matches.Count == 0)
+                {
+                    return new ResolveResult { Error = NotManagedError };
+                }
+
+                if (matches.Count > 1)
+                {
+                    return new ResolveResult { Error = AmbiguousError };
+                }
+
+                movie = matches[0];
             }
 
             if (movie.MovieFileId == 0)
@@ -130,6 +153,11 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
             }
 
             var file = await _radarr.GetMovieFileAsync(movie.MovieFileId);
+
+            if (file == null)
+            {
+                return new ResolveResult { Error = NoFileError };
+            }
 
             return new ResolveResult
             {
@@ -153,11 +181,34 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
         {
             var guids = await FetchGuidsAsync(item.GrandparentRatingKey);
             var tvdbId = ExtractId(guids, "tvdb");
-            var series = tvdbId.HasValue ? await _sonarr.FindSeriesByTvdbIdAsync(tvdbId.Value) : null;
+            SonarrSeriesInfo series;
 
-            if (series == null)
+            if (tvdbId.HasValue)
             {
-                return new ResolveResult { Error = NotManagedError };
+                series = await _sonarr.FindSeriesByTvdbIdAsync(tvdbId.Value);
+
+                if (series == null)
+                {
+                    return new ResolveResult { Error = NotManagedError };
+                }
+            }
+            else
+            {
+                // No usable tvdb GUID (old metadata agent) — fall back to a title lookup in
+                // Sonarr's own library. 0 matches → not managed, 2+ → ambiguous, stop either way.
+                var matches = await _sonarr.FindSeriesByTitleAsync(item.GrandparentTitle);
+
+                if (matches == null || matches.Count == 0)
+                {
+                    return new ResolveResult { Error = NotManagedError };
+                }
+
+                if (matches.Count > 1)
+                {
+                    return new ResolveResult { Error = AmbiguousError };
+                }
+
+                series = matches[0];
             }
 
             var episode = await _sonarr.FindEpisodeAsync(series.Id, item.SeasonNumber, item.EpisodeNumber);
@@ -173,6 +224,11 @@ namespace Requestrr.WebApi.RequestrrBot.Redownload
             }
 
             var file = await _sonarr.GetEpisodeFileAsync(episode.EpisodeFileId);
+
+            if (file == null)
+            {
+                return new ResolveResult { Error = NoFileError };
+            }
 
             return new ResolveResult
             {

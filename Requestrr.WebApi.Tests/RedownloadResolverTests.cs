@@ -16,6 +16,7 @@ namespace Requestrr.WebApi.Tests
             public Func<int, SonarrSeriesInfo> FindSeriesByTvdbId = _ => null;
             public Func<int, int, int, SonarrEpisodeInfo> FindEpisode = (seriesId, season, episode) => null;
             public Func<int, MediaFileInfo> GetEpisodeFile = _ => null;
+            public Func<string, IReadOnlyList<SonarrSeriesInfo>> FindSeriesByTitle = _ => Array.Empty<SonarrSeriesInfo>();
             public int FindSeriesByTvdbIdCallCount;
 
             public Task<SonarrSeriesInfo> FindSeriesByTvdbIdAsync(int tvdbId)
@@ -25,15 +26,18 @@ namespace Requestrr.WebApi.Tests
             }
             public Task<SonarrEpisodeInfo> FindEpisodeAsync(int seriesId, int season, int episode) => Task.FromResult(FindEpisode(seriesId, season, episode));
             public Task<MediaFileInfo> GetEpisodeFileAsync(int episodeFileId) => Task.FromResult(GetEpisodeFile(episodeFileId));
+            public Task<IReadOnlyList<SonarrSeriesInfo>> FindSeriesByTitleAsync(string title) => Task.FromResult(FindSeriesByTitle(title));
         }
 
         private class FakeRadarrLookup : IRadarrRedownloadLookup
         {
             public Func<int, RadarrMovieInfo> FindMovieByTmdbId = _ => null;
             public Func<int, MediaFileInfo> GetMovieFile = _ => null;
+            public Func<string, int, IReadOnlyList<RadarrMovieInfo>> FindMoviesByTitleYear = (_, __) => Array.Empty<RadarrMovieInfo>();
 
             public Task<RadarrMovieInfo> FindMovieByTmdbIdAsync(int tmdbId) => Task.FromResult(FindMovieByTmdbId(tmdbId));
             public Task<MediaFileInfo> GetMovieFileAsync(int movieFileId) => Task.FromResult(GetMovieFile(movieFileId));
+            public Task<IReadOnlyList<RadarrMovieInfo>> FindMoviesByTitleYearAsync(string title, int year) => Task.FromResult(FindMoviesByTitleYear(title, year));
         }
 
         // TautulliClient is a concrete class with an HTTP-only constructor path; the resolver's
@@ -299,6 +303,206 @@ namespace Requestrr.WebApi.Tests
                 SeasonNumber = 1,
                 EpisodeNumber = 2,
             };
+
+            var result = await resolver.ResolveTargetAsync(item);
+
+            Assert.Null(result.Target);
+            Assert.Contains("no file on record", result.Error);
+        }
+
+        // ---- title/year fallback (no usable GUID) -------------------------------------------------------
+
+        [Fact]
+        public async Task ResolveTarget_Episode_NoGuid_OneTitleMatch_Resolves()
+        {
+            var series = new SonarrSeriesInfo { Id = 10, SeriesType = "standard", Path = "/data/plexmedia/TV/Show" };
+            var sonarr = new FakeSonarrLookup
+            {
+                FindSeriesByTitle = title => title == "Show" ? new[] { series } : Array.Empty<SonarrSeriesInfo>(),
+                FindEpisode = (seriesId, season, episode) => new SonarrEpisodeInfo { Id = 55, EpisodeFileId = 99, Monitored = true },
+                GetEpisodeFile = _ => new MediaFileInfo { Id = 99, Path = "/data/plexmedia/TV/Show/ep.mkv", Quality = "WEBDL-1080p", SizeBytes = 1000, ReleaseGroup = "GRP" },
+            };
+
+            var resolver = new TestResolver(sonarr, new FakeRadarrLookup(), new RedownloadResolverOptions());
+            // No tvdb guid at all — old metadata agent scenario.
+            resolver.GuidsByRatingKey["gp1"] = new[] { "imdb://tt123" };
+
+            var item = new WatchedItem
+            {
+                RatingKey = "rk1",
+                GrandparentRatingKey = "gp1",
+                IsMovie = false,
+                Title = "Ep",
+                GrandparentTitle = "Show",
+                SeasonNumber = 1,
+                EpisodeNumber = 2,
+            };
+
+            var result = await resolver.ResolveTargetAsync(item);
+
+            Assert.Null(result.Error);
+            Assert.NotNull(result.Target);
+            Assert.Equal(55, result.Target.ArrId);
+            Assert.Equal(10, result.Target.SeriesId);
+        }
+
+        [Fact]
+        public async Task ResolveTarget_Episode_NoGuid_TwoTitleMatches_ReturnsAmbiguousError()
+        {
+            var seriesA = new SonarrSeriesInfo { Id = 10, SeriesType = "standard", Path = "/data/plexmedia/TV/Show" };
+            var seriesB = new SonarrSeriesInfo { Id = 11, SeriesType = "standard", Path = "/data/plexmedia/TV/Show (2019)" };
+            var sonarr = new FakeSonarrLookup { FindSeriesByTitle = _ => new[] { seriesA, seriesB } };
+
+            var resolver = new TestResolver(sonarr, new FakeRadarrLookup(), new RedownloadResolverOptions());
+            resolver.GuidsByRatingKey["gp1"] = new[] { "imdb://tt123" };
+
+            var item = new WatchedItem
+            {
+                RatingKey = "rk1",
+                GrandparentRatingKey = "gp1",
+                IsMovie = false,
+                Title = "Ep",
+                GrandparentTitle = "Show",
+                SeasonNumber = 1,
+                EpisodeNumber = 2,
+            };
+
+            var result = await resolver.ResolveTargetAsync(item);
+
+            Assert.Null(result.Target);
+            Assert.Contains("couldn't be matched confidently", result.Error);
+        }
+
+        [Fact]
+        public async Task ResolveTarget_Episode_NoGuid_ZeroTitleMatches_ReturnsNotManagedError()
+        {
+            var sonarr = new FakeSonarrLookup(); // FindSeriesByTitle defaults to empty list
+            var resolver = new TestResolver(sonarr, new FakeRadarrLookup(), new RedownloadResolverOptions());
+            resolver.GuidsByRatingKey["gp1"] = new[] { "imdb://tt123" };
+
+            var item = new WatchedItem
+            {
+                RatingKey = "rk1",
+                GrandparentRatingKey = "gp1",
+                IsMovie = false,
+                Title = "Ep",
+                GrandparentTitle = "Show",
+                SeasonNumber = 1,
+                EpisodeNumber = 2,
+            };
+
+            var result = await resolver.ResolveTargetAsync(item);
+
+            Assert.Null(result.Target);
+            Assert.Contains("not managed", result.Error);
+        }
+
+        [Fact]
+        public async Task ResolveTarget_Movie_NoGuid_OneTitleMatch_Resolves()
+        {
+            var movie = new RadarrMovieInfo { Id = 42, MovieFileId = 77, Monitored = true, Title = "Sweet Home Alabama" };
+            var file = new MediaFileInfo { Id = 77, Path = "/data/plexmedia/Movies/Sweet Home Alabama/movie.mkv", Quality = "WEBDL-2160p", SizeBytes = 3_000_000_000L, ReleaseGroup = "EDITH" };
+
+            var radarr = new FakeRadarrLookup
+            {
+                FindMoviesByTitleYear = (title, year) => title == "Sweet Home Alabama" && year == 2002 ? new[] { movie } : Array.Empty<RadarrMovieInfo>(),
+                GetMovieFile = _ => file,
+            };
+
+            var resolver = new TestResolver(new FakeSonarrLookup(), radarr, new RedownloadResolverOptions());
+            // No tmdb guid at all — old metadata agent scenario.
+            resolver.GuidsByRatingKey["rk1"] = new[] { "imdb://tt123" };
+
+            var item = new WatchedItem { RatingKey = "rk1", IsMovie = true, Title = "Sweet Home Alabama", Year = 2002 };
+
+            var result = await resolver.ResolveTargetAsync(item);
+
+            Assert.Null(result.Error);
+            Assert.NotNull(result.Target);
+            Assert.Equal(42, result.Target.ArrId);
+            Assert.Equal(77, result.Target.FileId);
+        }
+
+        [Fact]
+        public async Task ResolveTarget_Movie_NoGuid_TwoTitleMatches_ReturnsAmbiguousError()
+        {
+            var movieA = new RadarrMovieInfo { Id = 42, MovieFileId = 77, Title = "Sweet Home Alabama" };
+            var movieB = new RadarrMovieInfo { Id = 43, MovieFileId = 78, Title = "Sweet Home Alabama" };
+            var radarr = new FakeRadarrLookup { FindMoviesByTitleYear = (_, __) => new[] { movieA, movieB } };
+
+            var resolver = new TestResolver(new FakeSonarrLookup(), radarr, new RedownloadResolverOptions());
+            resolver.GuidsByRatingKey["rk1"] = new[] { "imdb://tt123" };
+
+            var item = new WatchedItem { RatingKey = "rk1", IsMovie = true, Title = "Sweet Home Alabama", Year = 2002 };
+
+            var result = await resolver.ResolveTargetAsync(item);
+
+            Assert.Null(result.Target);
+            Assert.Contains("couldn't be matched confidently", result.Error);
+        }
+
+        [Fact]
+        public async Task ResolveTarget_Movie_NoGuid_ZeroTitleMatches_ReturnsNotManagedError()
+        {
+            var radarr = new FakeRadarrLookup(); // FindMoviesByTitleYear defaults to empty list
+            var resolver = new TestResolver(new FakeSonarrLookup(), radarr, new RedownloadResolverOptions());
+            resolver.GuidsByRatingKey["rk1"] = new[] { "imdb://tt123" };
+
+            var item = new WatchedItem { RatingKey = "rk1", IsMovie = true, Title = "Sweet Home Alabama", Year = 2002 };
+
+            var result = await resolver.ResolveTargetAsync(item);
+
+            Assert.Null(result.Target);
+            Assert.Contains("not managed", result.Error);
+        }
+
+        // ---- null file result (nonzero file id, but the *arr file lookup misses) -------------------------------------------------------
+
+        [Fact]
+        public async Task ResolveTarget_Episode_NullFileResult_ReturnsNoFileError()
+        {
+            var series = new SonarrSeriesInfo { Id = 10, SeriesType = "standard", Path = "/data/plexmedia/TV/Show" };
+            var sonarr = new FakeSonarrLookup
+            {
+                FindSeriesByTvdbId = _ => series,
+                FindEpisode = (seriesId, season, episode) => new SonarrEpisodeInfo { Id = 55, EpisodeFileId = 99, Monitored = true },
+                GetEpisodeFile = _ => null, // nonzero EpisodeFileId, but the file record is missing
+            };
+
+            var resolver = new TestResolver(sonarr, new FakeRadarrLookup(), new RedownloadResolverOptions());
+            resolver.GuidsByRatingKey["gp1"] = new[] { "tvdb://555" };
+
+            var item = new WatchedItem
+            {
+                RatingKey = "rk1",
+                GrandparentRatingKey = "gp1",
+                IsMovie = false,
+                Title = "Ep",
+                GrandparentTitle = "Show",
+                SeasonNumber = 1,
+                EpisodeNumber = 2,
+            };
+
+            var result = await resolver.ResolveTargetAsync(item);
+
+            Assert.Null(result.Target);
+            Assert.Contains("no file on record", result.Error);
+        }
+
+        [Fact]
+        public async Task ResolveTarget_Movie_NullFileResult_ReturnsNoFileError()
+        {
+            var movie = new RadarrMovieInfo { Id = 42, MovieFileId = 77, Monitored = true, Title = "Sweet Home Alabama" };
+            var radarr = new FakeRadarrLookup
+            {
+                FindMovieByTmdbId = _ => movie,
+                GetMovieFile = _ => null, // nonzero MovieFileId, but the file record is missing
+            };
+
+            var resolver = new TestResolver(new FakeSonarrLookup(), radarr, new RedownloadResolverOptions());
+            resolver.GuidsByRatingKey["rk1"] = new[] { "tmdb://456" };
+
+            var item = new WatchedItem { RatingKey = "rk1", IsMovie = true, Title = "Sweet Home Alabama", Year = 2002 };
 
             var result = await resolver.ResolveTargetAsync(item);
 
