@@ -71,7 +71,7 @@ function Books(props) {
           saveAction = dispatch(saveBookshelfClient());
         }
 
-        saveAction.then(data => {
+        saveAction.catch(err => ({ ok: false, error: `Could not save: ${err.message}` })).then(data => {
           setIsSaving(false);
           setIsSubmitted(false);
 

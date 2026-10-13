@@ -103,6 +103,25 @@ function connectionBody(category, version) {
 }
 
 
+// Reads a response body as JSON; any failure (non-2xx with non-JSON body, HTML error page, ...)
+// resolves to { ok:false, error } with the HTTP status. A JSON body (including 400 { error }) is returned as-is.
+function readJson(response) {
+    return response.text().then(text => {
+        let body;
+        try {
+            body = JSON.parse(text);
+        } catch (e) {
+            return { ok: false, error: `Request failed with HTTP ${response.status}${response.statusText ? " " + response.statusText : ""}.` };
+        }
+
+        if (!response.ok && !(body && (body.error || body.ok === false)))
+            return { ok: false, error: `Request failed with HTTP ${response.status}.` };
+
+        return body;
+    });
+}
+
+
 function findCategory(state, categoryId) {
     return state.books.bookshelf.categories.find(c => c.id === categoryId);
 }
@@ -180,7 +199,7 @@ export function testBookshelfSettings(categoryId) {
             },
             body: connectionBody(category, state.books.bookshelf.version)
         })
-            .then(data => data.json())
+            .then(readJson)
             .then(data => {
                 dispatch(loadBookshelfProfiles(categoryId, true));
                 dispatch(loadBookshelfMetadataProfiles(categoryId, true));
@@ -189,8 +208,9 @@ export function testBookshelfSettings(categoryId) {
 
                 if (data.ok)
                     return { ok: true };
-                return { ok: false, error: data.error ?? data };
-            });
+                return { ok: false, error: data.error ?? "The settings could not be validated." };
+            })
+            .catch(err => ({ ok: false, error: `Could not reach the server: ${err.message}` }));
     };
 }
 
@@ -219,7 +239,7 @@ export function saveBookshelfClient() {
                 version: "1"
             })
         })
-            .then(data => data.json())
+            .then(readJson)
             .then(data => {
                 if (data.ok) {
                     // Keep the in-memory categories (with loaded lists); only the client flips to Bookshelf.
@@ -227,7 +247,8 @@ export function saveBookshelfClient() {
                     return { ok: true };
                 }
 
-                return { ok: false, error: data.error ?? data };
-            });
+                return { ok: false, error: data.error ?? "An unknown error occurred while saving." };
+            })
+            .catch(err => ({ ok: false, error: `Could not reach the server: ${err.message}` }));
     };
 }

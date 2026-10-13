@@ -89,6 +89,7 @@ function BookshelfCategory(props) {
       setIsTestingSettings(true);
 
       dispatch(testBookshelfSettings(category.id))
+        .catch(err => ({ ok: false, error: `Test failed: ${err.message}` }))
         .then(data => {
           if (data.ok) {
             setTestSettingsRequested(true);
