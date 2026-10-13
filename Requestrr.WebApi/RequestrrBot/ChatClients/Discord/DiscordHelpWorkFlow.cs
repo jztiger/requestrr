@@ -67,6 +67,8 @@ namespace Requestrr.WebApi.RequestrrBot.ChatClients.Discord
                 list += GenerateSlashType(SlashCommandBuilder.CommandList[SlashCommandBuilder.CommandType.Tv]);
             if (SlashCommandBuilder.CommandList.ContainsKey(SlashCommandBuilder.CommandType.Music))
                 list += GenerateSlashType(SlashCommandBuilder.CommandList[SlashCommandBuilder.CommandType.Music]);
+            if (SlashCommandBuilder.CommandList.ContainsKey(SlashCommandBuilder.CommandType.Book))
+                list += GenerateSlashType(SlashCommandBuilder.CommandList[SlashCommandBuilder.CommandType.Book]);
             if (SlashCommandBuilder.CommandList.ContainsKey(SlashCommandBuilder.CommandType.Redownload))
                 list += GenerateSlashType(SlashCommandBuilder.CommandList[SlashCommandBuilder.CommandType.Redownload]);
             if (SlashCommandBuilder.CommandList.ContainsKey(SlashCommandBuilder.CommandType.IssueMovie))

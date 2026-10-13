@@ -22,6 +22,7 @@ namespace Requestrr.WebApi.Controllers.ChatClients
         public string[] MovieRoles { get; set; }
 
         public string[] MusicRoles { get; set; }
+        public string[] BookRoles { get; set; }
 
         public bool EnableRequestsThroughDirectMessages { get; set; }
 

@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using Requestrr.WebApi.RequestrrBot.DownloadClients.Bookshelf;
 using Requestrr.WebApi.RequestrrBot.DownloadClients.Lidarr;
 using Requestrr.WebApi.RequestrrBot.DownloadClients.Overseerr;
 using Requestrr.WebApi.RequestrrBot.DownloadClients.Radarr;
@@ -318,6 +319,26 @@ namespace Requestrr.WebApi
                     AnimeSkipMessage = "🍥 Skipped {count} anime title(s) — /redownload doesn't do anime: dual audio, a dozen fansub groups, and absolute numbering make \"grab a different one\" a coin flip. That means you, {user} 😉"
                 }));
 
+                File.WriteAllText(settingsFilePath, JsonConvert.SerializeObject(settingsJson));
+            }
+
+            if (settingsJson.Version.ToString().Equals("2.1.4", StringComparison.InvariantCultureIgnoreCase))
+            {
+                settingsJson.Version = "2.1.5";
+
+                var bookshelf = new BookshelfSettings
+                {
+                    Categories = new[]
+                    {
+                        new BookshelfCategory { Id = 0, Name = "audiobook", RootFolder = "/data/plexmedia/Audiobooks" },
+                        new BookshelfCategory { Id = 1, Name = "ebook",     RootFolder = "/data/plexmedia/Books/arr" }
+                    },
+                    Version = "1"
+                };
+
+                ((JObject)settingsJson["DownloadClients"]).Add("Bookshelf", JToken.FromObject(bookshelf));
+                ((JObject)settingsJson).Add("Books", JToken.FromObject(new { Client = "Disabled" }));
+                ((JObject)settingsJson.ChatClients.Discord).Add("BookRoles", JToken.FromObject(new List<string>()));
                 File.WriteAllText(settingsFilePath, JsonConvert.SerializeObject(settingsJson));
             }
         }

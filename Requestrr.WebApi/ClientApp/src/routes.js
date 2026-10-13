@@ -21,6 +21,7 @@ import ChatClients from "./views/ChatClients.jsx";
 import Movies from "./views/Movies.jsx";
 import TvShows from "./views/TvShows.jsx";
 import Music from "./views/Music.jsx"
+import Books from "./views/Books.jsx"
 import Redownload from "./views/Redownload.jsx"
 import Register from "./views/Register.jsx";
 import Login from "./views/Login.jsx";
@@ -56,6 +57,14 @@ var routes = [
     name: "Music",
     icon: "fas fa-music text-yellow",
     component: <Music/>,
+    layout: "/admin",
+    supportsAnonymousUser: true
+  },
+  {
+    path: "/books",
+    name: "Books",
+    icon: "fas fa-book text-info",
+    component: <Books/>,
     layout: "/admin",
     supportsAnonymousUser: true
   },
