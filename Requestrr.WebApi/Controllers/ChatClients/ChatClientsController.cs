@@ -140,7 +140,7 @@ namespace Requestrr.WebApi.Controllers.ChatClients
                 return BadRequest("Invalid music roles, please make sure to enter the discord role ids.");
             }
 
-            if (model.BookRoles.Any(x => !ulong.TryParse(x, System.Globalization.NumberStyles.Integer, null, out _)))
+            if ((model.BookRoles ?? Array.Empty<string>()).Any(x => !ulong.TryParse(x, System.Globalization.NumberStyles.Integer, null, out _)))
             {
                 return BadRequest("Invalid book roles, please make sure to enter the discord role ids.");
             }
@@ -161,7 +161,11 @@ namespace Requestrr.WebApi.Controllers.ChatClients
             _chatClientsSettings.Discord.TvShowRoles = (model.TvShowRoles ?? Array.Empty<string>()).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).ToArray();
             _chatClientsSettings.Discord.MovieRoles = (model.MovieRoles ?? Array.Empty<string>()).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).ToArray();
             _chatClientsSettings.Discord.MusicRoles = (model.MusicRoles ?? Array.Empty<string>()).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).ToArray();
-            _chatClientsSettings.Discord.BookRoles = (model.BookRoles ?? Array.Empty<string>()).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).ToArray();
+            // A payload without bookRoles (older UI) leaves the stored roles untouched.
+            if (model.BookRoles != null)
+            {
+                _chatClientsSettings.Discord.BookRoles = model.BookRoles.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).ToArray();
+            }
             _chatClientsSettings.Discord.EnableRequestsThroughDirectMessages = model.EnableRequestsThroughDirectMessages;
             _chatClientsSettings.Discord.MonitoredChannels = (model.MonitoredChannels ?? Array.Empty<string>()).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).ToArray();
 
