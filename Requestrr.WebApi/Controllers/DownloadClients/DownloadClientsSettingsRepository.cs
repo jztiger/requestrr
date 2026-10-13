@@ -2,12 +2,15 @@
 using System.Linq;
 using System.Runtime;
 using Newtonsoft.Json.Linq;
+using Requestrr.WebApi.Controllers.DownloadClients.Bookshelf;
 using Requestrr.WebApi.Controllers.DownloadClients.Lidarr;
 using Requestrr.WebApi.Controllers.DownloadClients.Ombi;
 using Requestrr.WebApi.Controllers.DownloadClients.Overseerr;
 using Requestrr.WebApi.Controllers.DownloadClients.Radarr;
 using Requestrr.WebApi.Controllers.DownloadClients.Sonarr;
 using Requestrr.WebApi.RequestrrBot;
+using Requestrr.WebApi.RequestrrBot.Books;
+using Requestrr.WebApi.RequestrrBot.DownloadClients.Bookshelf;
 using Requestrr.WebApi.RequestrrBot.DownloadClients.Lidarr;
 using Requestrr.WebApi.RequestrrBot.DownloadClients.Overseerr;
 using Requestrr.WebApi.RequestrrBot.DownloadClients.Radarr;
@@ -30,6 +33,52 @@ namespace Requestrr.WebApi.Controllers.DownloadClients
             {
                 NotificationsFile.ClearAllMusicNotifications();
                 settings.Music.Client = musicSettings.Client;
+            });
+        }
+
+
+        public static void SetDisabledClient(BooksSettings booksSettings)
+        {
+            SettingsFile.Write(settings =>
+            {
+                NotificationsFile.ClearAllBookNotifications();
+                settings.Books.Client = booksSettings.Client;
+            });
+        }
+
+
+        /// <summary>
+        /// Handles the saving of new Bookshelf settings
+        /// </summary>
+        public static void SetBookshelf(BooksSettings booksSettings, BookshelfSettingsModel bookshelfSettings)
+        {
+            SettingsFile.Write(settings =>
+            {
+                settings.DownloadClients.Bookshelf.Categories = JToken.FromObject(bookshelfSettings.Categories.Select(x => new BookshelfCategory
+                {
+                    Id = x.Id,
+                    Name = x.Name,
+                    Hostname = x.Hostname,
+                    Port = x.Port,
+                    ApiKey = x.ApiKey,
+                    BaseUrl = x.BaseUrl,
+                    UseSSL = x.UseSSL,
+                    ProfileId = x.ProfileId,
+                    MetadataProfileId = x.MetadataProfileId,
+                    RootFolder = x.RootFolder,
+                    Tags = x.Tags,
+                    SearchNewRequests = x.SearchNewRequests,
+                    MonitorNewRequests = x.MonitorNewRequests
+                }).ToArray());
+
+                settings.DownloadClients.Bookshelf.Version = bookshelfSettings.Version;
+
+                if (settings.Books.Client != booksSettings.Client)
+                {
+                    NotificationsFile.ClearAllBookNotifications();
+                }
+
+                settings.Books.Client = booksSettings.Client;
             });
         }
 
