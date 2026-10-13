@@ -42,28 +42,7 @@ namespace Requestrr.WebApi.RequestrrBot.Notifications.Books
                     try
                     {
                         var current = _notificationsRepository.GetAllBookNotifications();
-                        foreach (var catGroup in current.GroupBy(x => x.Key.categoryId))
-                        {
-                            var ids = new HashSet<string>(catGroup.Select(x => x.Key.bookId));
-                            var available = await _searcher.SearchAvailableBooksAsync(catGroup.Key, ids, _tokenSource.Token);
-
-                            foreach (var kv in catGroup.Where(x => available.ContainsKey(x.Key.bookId)))
-                            {
-                                if (_tokenSource.IsCancellationRequested)
-                                    return;
-
-                                try
-                                {
-                                    var notified = await _notifier.NotifyBookAsync(kv.Value.ToArray(), available[kv.Key.bookId], _tokenSource.Token);
-                                    foreach (var u in notified)
-                                        _notificationsRepository.RemoveNotification(u, kv.Key.categoryId, kv.Key.bookId);
-                                }
-                                catch (Exception ex)
-                                {
-                                    _logger.LogError(ex, "An error occurred while processing book notifications: " + ex.Message);
-                                }
-                            }
-                        }
+                        await ProcessNotificationsAsync(current, _notificationsRepository.RemoveNotification);
                     }
                     catch (Exception ex)
                     {
@@ -73,6 +52,43 @@ namespace Requestrr.WebApi.RequestrrBot.Notifications.Books
                     await Task.Delay(TimeSpan.FromMinutes(1), _tokenSource.Token);
                 }
             }, _tokenSource.Token);
+        }
+
+        /// <summary>One polling pass. Each category is isolated so one failing category cannot starve the others.</summary>
+        public async Task ProcessNotificationsAsync(Dictionary<(int categoryId, string bookId), HashSet<string>> current, Action<string, int, string> removeNotification)
+        {
+            foreach (var catGroup in current.GroupBy(x => x.Key.categoryId))
+            {
+                if (_tokenSource.IsCancellationRequested)
+                    return;
+
+                try
+                {
+                    var ids = new HashSet<string>(catGroup.Select(x => x.Key.bookId));
+                    var available = await _searcher.SearchAvailableBooksAsync(catGroup.Key, ids, _tokenSource.Token);
+
+                    foreach (var kv in catGroup.Where(x => available.ContainsKey(x.Key.bookId)))
+                    {
+                        if (_tokenSource.IsCancellationRequested)
+                            return;
+
+                        try
+                        {
+                            var notified = await _notifier.NotifyBookAsync(kv.Value.ToArray(), available[kv.Key.bookId], _tokenSource.Token);
+                            foreach (var u in notified)
+                                removeNotification(u, kv.Key.categoryId, kv.Key.bookId);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "An error occurred while processing book notifications: " + ex.Message);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, $"An error occurred while checking book availability for category {catGroup.Key}: " + ex.Message);
+                }
+            }
         }
 
 
