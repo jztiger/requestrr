@@ -12,6 +12,7 @@
       "TvShowRoles": [],
       "MovieRoles": [],
       "MusicRoles": [],
+      "BookRoles": [],
       "MonitoredChannels": [],
       "EnableRequestsThroughDirectMessages": false,
       "AutomaticallyNotifyRequesters": true,
@@ -22,6 +23,13 @@
     "Language": "english"
   },
   "DownloadClients": {
+    "Bookshelf": {
+      "Categories": [
+        { "Id": 0, "Name": "audiobook", "Hostname": "", "Port": 8787, "ApiKey": "", "BaseUrl": "", "UseSSL": false, "ProfileId": 1, "MetadataProfileId": 1, "RootFolder": "/data/plexmedia/Audiobooks", "Tags": [], "SearchNewRequests": true, "MonitorNewRequests": true },
+        { "Id": 1, "Name": "ebook",     "Hostname": "", "Port": 8787, "ApiKey": "", "BaseUrl": "", "UseSSL": false, "ProfileId": 1, "MetadataProfileId": 1, "RootFolder": "/data/plexmedia/Books/arr",   "Tags": [], "SearchNewRequests": true, "MonitorNewRequests": true }
+      ],
+      "Version": "1"
+    },
     "Lidarr": {
       "Hostname": "",
       "Port": 8686,
@@ -128,6 +136,9 @@
   "Music": {
     "Client": "Disabled"
   },
+  "Books": {
+    "Client": "Disabled"
+  },
   "TvShows": {
     "Client": "Disabled",
     "Restrictions": "None"
@@ -145,5 +156,5 @@
   "Port": 4545,
   "BaseUrl": "",
   "DisableAuthentication": false,
-  "Version": "2.1.4"
+  "Version": "2.1.5"
 }

@@ -12,12 +12,15 @@ namespace Requestrr.WebApi.RequestrrBot.ChatClients.Discord
         public string[] TvShowRoles { get; set; }
         public string[] MovieRoles { get; set; }
         public string[] MusicRoles { get; set; }
+        public string[] BookRoles { get; set; }
         public string MovieDownloadClient { get; set; }
         public int MovieDownloadClientConfigurationHash { get; set; }
         public string TvShowDownloadClient { get; set; }
         public int TvShowDownloadClientConfigurationHash { get; set; }
         public string MusicDownloadClient { get; set; }
         public int MusicDownloadClientConfigurationHash { get; set; }
+        public string BookDownloadClient { get; set; }
+        public int BookDownloadClientConfigurationHash { get; set; }
         public int RedownloadConfigurationHash { get; set; }
         public bool EnableRequestsThroughDirectMessages { get; set; }
         public bool AutomaticallyNotifyRequesters { get; set; }
@@ -35,12 +38,15 @@ namespace Requestrr.WebApi.RequestrrBot.ChatClients.Discord
                    TvShowRoles.SequenceEqual(settings.TvShowRoles) &&
                    MovieRoles.SequenceEqual(settings.MovieRoles) &&
                    MusicRoles.SequenceEqual(settings.MusicRoles) &&
+                   BookRoles.SequenceEqual(settings.BookRoles) &&
                    MovieDownloadClient == settings.MovieDownloadClient &&
                    MovieDownloadClientConfigurationHash == settings.MovieDownloadClientConfigurationHash &&
                    TvShowDownloadClient == settings.TvShowDownloadClient &&
                    TvShowDownloadClientConfigurationHash == settings.TvShowDownloadClientConfigurationHash &&
                    MusicDownloadClient == settings.MusicDownloadClient &&
                    MusicDownloadClientConfigurationHash == settings.MusicDownloadClientConfigurationHash &&
+                   BookDownloadClient == settings.BookDownloadClient &&
+                   BookDownloadClientConfigurationHash == settings.BookDownloadClientConfigurationHash &&
                    RedownloadConfigurationHash == settings.RedownloadConfigurationHash &&
                    EnableRequestsThroughDirectMessages == settings.EnableRequestsThroughDirectMessages &&
                    AutomaticallyNotifyRequesters == settings.AutomaticallyNotifyRequesters &&
@@ -59,12 +65,15 @@ namespace Requestrr.WebApi.RequestrrBot.ChatClients.Discord
             hash.Add(MovieRoles);
             hash.Add(TvShowRoles);
             hash.Add(MusicRoles);
+            hash.Add(BookRoles);
             hash.Add(MovieDownloadClient);
             hash.Add(MovieDownloadClientConfigurationHash);
             hash.Add(TvShowDownloadClient);
             hash.Add(TvShowDownloadClientConfigurationHash);
             hash.Add(MusicDownloadClient);
             hash.Add(MusicDownloadClientConfigurationHash);
+            hash.Add(BookDownloadClient);
+            hash.Add(BookDownloadClientConfigurationHash);
             hash.Add(RedownloadConfigurationHash);
             hash.Add(EnableRequestsThroughDirectMessages);
             hash.Add(AutomaticallyNotifyRequesters);

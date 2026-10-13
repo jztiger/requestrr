@@ -19,6 +19,7 @@ namespace Requestrr.WebApi.Tests
             ""Radarr"": { ""Hostname"": """", ""Port"": 7878 },
             ""Sonarr"": { ""Hostname"": """", ""Port"": 8989 }
           },
+          ""ChatClients"": { ""Discord"": { ""MusicRoles"": [] } },
           ""Version"": ""2.1.3""
         }";
 
@@ -42,7 +43,8 @@ namespace Requestrr.WebApi.Tests
 
             var result = JObject.Parse(File.ReadAllText(_tempPath));
 
-            Assert.Equal("2.1.4", (string)result["Version"]);
+            // The chain keeps going past 2.1.4, so a 2.1.3 file ends at the latest version.
+            Assert.Equal("2.1.5", (string)result["Version"]);
 
             var tautulli = (JObject)result["DownloadClients"]["Tautulli"];
             Assert.NotNull(tautulli);
@@ -177,6 +179,41 @@ namespace Requestrr.WebApi.Tests
             finally
             {
                 SettingsFile._cachedSettings = null;
+            }
+        }
+
+        [Fact]
+        public void Upgrade_From_2_1_4_Adds_Books_Bookshelf_And_BookRoles_Without_Touching_Others()
+        {
+            var json = JObject.Parse(File.ReadAllText("../../../../Requestrr.WebApi/SettingsTemplate.json"));
+            json["Version"] = "2.1.4";
+            ((JObject)json["DownloadClients"]).Remove("Bookshelf");
+            json.Remove("Books");
+            ((JObject)json["ChatClients"]["Discord"]).Remove("BookRoles");
+            var before = json["Redownload"].DeepClone();
+            var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".json");
+            File.WriteAllText(path, json.ToString());
+
+            try
+            {
+                SettingsFileUpgrader.Upgrade(path);
+
+                var after = JObject.Parse(File.ReadAllText(path));
+                Assert.Equal("2.1.5", (string)after["Version"]);
+                Assert.Equal("Disabled", (string)after["Books"]["Client"]);
+                Assert.Equal("1", (string)after["DownloadClients"]["Bookshelf"]["Version"]);
+                var cats = (JArray)after["DownloadClients"]["Bookshelf"]["Categories"];
+                Assert.Equal(2, cats.Count);
+                Assert.Equal("audiobook", (string)cats[0]["Name"]); Assert.Equal(0, (int)cats[0]["Id"]);
+                Assert.Equal("ebook", (string)cats[1]["Name"]);     Assert.Equal(1, (int)cats[1]["Id"]);
+                Assert.Equal(8787, (int)cats[0]["Port"]);
+                Assert.Empty((JArray)after["ChatClients"]["Discord"]["BookRoles"]);
+                Assert.True(JToken.DeepEquals(before, after["Redownload"]));
+                Assert.Equal("Disabled", (string)after["Music"]["Client"]);
+            }
+            finally
+            {
+                File.Delete(path);
             }
         }
 
