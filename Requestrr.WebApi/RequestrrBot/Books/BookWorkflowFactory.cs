@@ -42,7 +42,7 @@ namespace Requestrr.WebApi.RequestrrBot.Books
                 GetBookClient<IBookSearcher>(settings),
                 GetBookClient<IBookRequester>(settings),
                 new DiscordBookUserInterface(interaction, GetBookClient<IBookSearcher>(settings), categoryId),
-                CreateBookNotificationWorkflow(interaction, settings)
+                CreateBookNotificationWorkflow(interaction, settings, categoryId)
                 );
         }
 
@@ -51,6 +51,7 @@ namespace Requestrr.WebApi.RequestrrBot.Books
         public IBookNotificationWorkflow CreateNotificationWorkflow(DiscordInteraction interaction)
         {
             DiscordSettings settings = _settingsProvider.Provide();
+            // The bknr click handler never builds a BkNR id, so the default category is fine here.
             return CreateBookNotificationWorkflow(interaction, settings);
         }
 
@@ -72,9 +73,10 @@ namespace Requestrr.WebApi.RequestrrBot.Books
 
 
 
-        private IBookNotificationWorkflow CreateBookNotificationWorkflow(DiscordInteraction interaction, DiscordSettings settings)
+        // internal for tests. categoryId is what the UI embeds in the BkNR (Notify me) button id.
+        internal IBookNotificationWorkflow CreateBookNotificationWorkflow(DiscordInteraction interaction, DiscordSettings settings, int categoryId = -1)
         {
-            DiscordBookUserInterface userInterface = new DiscordBookUserInterface(interaction, GetBookClient<IBookSearcher>(settings));
+            DiscordBookUserInterface userInterface = new DiscordBookUserInterface(interaction, GetBookClient<IBookSearcher>(settings), categoryId);
             IBookNotificationWorkflow bookNotificationWorkflow = new DisabledBookNotificationWorkflow(userInterface);
 
             if (settings.NotificationMode != NotificationMode.Disabled)

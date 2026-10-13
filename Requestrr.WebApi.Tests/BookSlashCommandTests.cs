@@ -32,7 +32,7 @@ namespace Requestrr.WebApi.Tests
             throw new FileNotFoundException("SlashCommands.txt not found");
         }
 
-        private static string Build(string bookClient, ulong[] roles = null)
+        private static string Build(string bookClient, ulong[] roles = null, string musicClient = DownloadClient.Disabled)
         {
             var previous = Language.Current;
             Language.Current = new Language
@@ -50,7 +50,7 @@ namespace Requestrr.WebApi.Tests
                     MonitoredChannels = new string[] { "1" },
                     MovieDownloadClient = DownloadClient.Disabled,
                     TvShowDownloadClient = DownloadClient.Disabled,
-                    MusicDownloadClient = DownloadClient.Disabled,
+                    MusicDownloadClient = musicClient,
                     BookDownloadClient = bookClient,
                 };
                 var books = new BookshelfSettings
@@ -61,7 +61,7 @@ namespace Requestrr.WebApi.Tests
                         new BookshelfCategory { Id = 1, Name = "ebook" },
                     }
                 };
-                return SlashCommandBuilder.GetCode(Template(), settings, new RadarrSettings(), new SonarrSettings(), new OverseerrSettings(), new OmbiSettings(), new LidarrSettings(), books, new RedownloadSettings(), new TautulliSettings());
+                return SlashCommandBuilder.GetCode(Template(), settings, new RadarrSettings(), new SonarrSettings(), new OverseerrSettings(), new OmbiSettings(), new LidarrSettings { Categories = new[] { new LidarrCategory { Id = 0, Name = "music" } } }, books, new RedownloadSettings(), new TautulliSettings());
             }
             finally { Language.Current = previous; }
         }
@@ -88,6 +88,32 @@ namespace Requestrr.WebApi.Tests
             var code = Build("Disabled");
             Assert.DoesNotContain("BookByTitle", code);
             Assert.False(SlashCommandBuilder.CommandList.ContainsKey(SlashCommandBuilder.CommandType.Book));
+        }
+
+        [Fact]
+        public void Music_enabled_books_disabled_removes_only_book_block()
+        {
+            var code = Build("Disabled", musicClient: DownloadClient.Lidarr);
+
+            Assert.Contains("MusicArtistByName0(", code);
+            Assert.DoesNotContain("BookByTitle", code);
+            Assert.DoesNotContain("[BOOK_", code);
+            Assert.False(SlashCommandBuilder.CommandList.ContainsKey(SlashCommandBuilder.CommandType.Book));
+            Assert.True(SlashCommandBuilder.CommandList.ContainsKey(SlashCommandBuilder.CommandType.Music));
+        }
+
+        [Fact]
+        public void Music_and_books_enabled_both_expand()
+        {
+            var code = Build("Bookshelf", new ulong[] { 5 }, DownloadClient.Lidarr);
+
+            Assert.Contains("MusicArtistByName0(", code);
+            Assert.Contains("BookByTitle0(", code);
+            Assert.Contains("BookByTitle1(", code);
+            Assert.DoesNotContain("[BOOK_", code);
+            Assert.DoesNotContain("[MUSIC_", code);
+            Assert.Equal(new List<string> { "request music" }, SlashCommandBuilder.CommandList[SlashCommandBuilder.CommandType.Music]);
+            Assert.Equal(2, SlashCommandBuilder.CommandList[SlashCommandBuilder.CommandType.Book].Count);
         }
     }
 }

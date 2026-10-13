@@ -15,6 +15,7 @@ namespace Requestrr.WebApi.RequestrrBot.ChatClients.Discord
         private readonly IBookSearcher _bookSearcher;
         // AskForNotificationBookRequestAsync(Book) carries no request, so the category is captured at construction.
         private readonly int _categoryId;
+        internal int CategoryId => _categoryId;
 
         public DiscordBookUserInterface(DiscordInteraction interactionContext, IBookSearcher bookSearcher, int categoryId = -1)
         {
