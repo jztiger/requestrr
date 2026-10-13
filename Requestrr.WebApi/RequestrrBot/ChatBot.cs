@@ -22,9 +22,12 @@ using Requestrr.WebApi.RequestrrBot.DownloadClients.Sonarr;
 using Requestrr.WebApi.RequestrrBot.DownloadClients.Tautulli;
 using Requestrr.WebApi.RequestrrBot.Locale;
 using Requestrr.WebApi.RequestrrBot.Movies;
+using Requestrr.WebApi.RequestrrBot.Books;
+using Requestrr.WebApi.RequestrrBot.DownloadClients.Bookshelf;
 using Requestrr.WebApi.RequestrrBot.Music;
 using Requestrr.WebApi.RequestrrBot.Notifications;
 using Requestrr.WebApi.RequestrrBot.Notifications.Movies;
+using Requestrr.WebApi.RequestrrBot.Notifications.Books;
 using Requestrr.WebApi.RequestrrBot.Notifications.Music;
 using Requestrr.WebApi.RequestrrBot.Notifications.TvShows;
 using Requestrr.WebApi.RequestrrBot.Redownload;
@@ -38,6 +41,7 @@ namespace Requestrr.WebApi.RequestrrBot
         private MovieNotificationEngine _movieNotificationEngine;
         private TvShowNotificationEngine _tvShowNotificationEngine;
         private MusicNotificationEngine _musicNotificationEngine;
+        private BookNotificationEngine _bookNotificationEngine;
         private RedownloadEngine _redownloadEngine;
         private readonly IServiceProvider _serviceProvider;
         private readonly ILogger<ChatBot> _logger;
@@ -47,15 +51,18 @@ namespace Requestrr.WebApi.RequestrrBot
         private MovieWorkflowFactory _movieWorkflowFactory;
         private TvShowWorkflowFactory _tvShowWorkflowFactory;
         private MusicWorkflowFactory _musicWorkflowFactory;
+        private BookWorkflowFactory _bookWorkflowFactory;
         private RedownloadWorkflowFactory _redownloadWorkflowFactory;
         private MovieNotificationsRepository _movieNotificationRepository = new MovieNotificationsRepository();
         private TvShowNotificationsRepository _tvShowNotificationRepository = new TvShowNotificationsRepository();
         private MusicNotificationsRepository _musicNotificationRepository = new MusicNotificationsRepository();
+        private BookNotificationsRepository _bookNotificationRepository = new BookNotificationsRepository();
         private OverseerrClient _overseerrClient;
         private OmbiClient _ombiDownloadClient;
         private RadarrClient _radarrDownloadClient;
         private SonarrClient _sonarrDownloadClient;
         private LidarrClient _lidarrDownloadClient;
+        private BookshelfClient _bookshelfDownloadClient;
         private SlashCommandsExtension _slashCommands = null;
         private HashSet<ulong> _currentGuilds = new HashSet<ulong>();
         private Language _previousLanguage = Language.Current;
@@ -75,9 +82,11 @@ namespace Requestrr.WebApi.RequestrrBot
             _radarrDownloadClient = new RadarrClient(serviceProvider.Get<IHttpClientFactory>(), serviceProvider.Get<ILogger<RadarrClient>>(), serviceProvider.Get<RadarrSettingsProvider>());
             _sonarrDownloadClient = new SonarrClient(serviceProvider.Get<IHttpClientFactory>(), serviceProvider.Get<ILogger<SonarrClient>>(), serviceProvider.Get<SonarrSettingsProvider>());
             _lidarrDownloadClient = new LidarrClient(serviceProvider.Get<IHttpClientFactory>(), serviceProvider.Get<ILogger<LidarrClient>>(), serviceProvider.Get<LidarrSettingsProvider>());
+            _bookshelfDownloadClient = new BookshelfClient(serviceProvider.Get<IHttpClientFactory>(), serviceProvider.Get<ILogger<BookshelfClient>>(), serviceProvider.Get<BookshelfSettingsProvider>());
             _movieWorkflowFactory = new MovieWorkflowFactory(_discordSettingsProvider, _movieNotificationRepository, _overseerrClient, _ombiDownloadClient, _radarrDownloadClient);
             _tvShowWorkflowFactory = new TvShowWorkflowFactory(serviceProvider.Get<TvShowsSettingsProvider>(), _discordSettingsProvider, _tvShowNotificationRepository, _overseerrClient, _ombiDownloadClient, _sonarrDownloadClient);
             _musicWorkflowFactory = new MusicWorkflowFactory(_discordSettingsProvider, _musicNotificationRepository, _lidarrDownloadClient);
+            _bookWorkflowFactory = new BookWorkflowFactory(_discordSettingsProvider, _bookNotificationRepository, _bookshelfDownloadClient);
             _redownloadWorkflowFactory = serviceProvider.Get<RedownloadWorkflowFactory>();
         }
 
@@ -201,6 +210,7 @@ namespace Requestrr.WebApi.RequestrrBot
                             .AddSingleton<MovieWorkflowFactory>(_movieWorkflowFactory)
                             .AddSingleton<TvShowWorkflowFactory>(_tvShowWorkflowFactory)
                             .AddSingleton<MusicWorkflowFactory>(_musicWorkflowFactory)
+                            .AddSingleton<BookWorkflowFactory>(_bookWorkflowFactory)
                             .AddSingleton<RedownloadWorkflowFactory>(_redownloadWorkflowFactory)
                             .BuildServiceProvider()
                     });
@@ -245,7 +255,7 @@ namespace Requestrr.WebApi.RequestrrBot
                             var prop = _slashCommands.GetType().GetProperty("_updateList", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                             prop.SetValue(_slashCommands, new List<KeyValuePair<ulong?, Type>>());
 
-                            var slashCommandType = SlashCommandBuilder.Build(_logger, newSettings, _serviceProvider.Get<RadarrSettingsProvider>(), _serviceProvider.Get<SonarrSettingsProvider>(), _serviceProvider.Get<OverseerrSettingsProvider>(), _serviceProvider.Get<OmbiSettingsProvider>(), _serviceProvider.Get<LidarrSettingsProvider>(), _serviceProvider.Get<RedownloadSettingsProvider>(), _serviceProvider.Get<TautulliSettingsProvider>());
+                            var slashCommandType = SlashCommandBuilder.Build(_logger, newSettings, _serviceProvider.Get<RadarrSettingsProvider>(), _serviceProvider.Get<SonarrSettingsProvider>(), _serviceProvider.Get<OverseerrSettingsProvider>(), _serviceProvider.Get<OmbiSettingsProvider>(), _serviceProvider.Get<LidarrSettingsProvider>(), _serviceProvider.Get<BookshelfSettingsProvider>(), _serviceProvider.Get<RedownloadSettingsProvider>(), _serviceProvider.Get<TautulliSettingsProvider>());
 
                             if (newSettings.EnableRequestsThroughDirectMessages)
                             {
@@ -396,6 +406,25 @@ namespace Requestrr.WebApi.RequestrrBot
 
             try
             {
+                if (_bookNotificationEngine != null)
+                {
+                    await _bookNotificationEngine.StopAsync();
+                }
+
+                if (_currentSettings.BookDownloadClient != DownloadClient.Disabled && _currentSettings.NotificationMode != NotificationMode.Disabled)
+                {
+                    _bookNotificationEngine = _bookWorkflowFactory.CreateBookNotificationEngine(_client, _logger);
+                }
+
+                _bookNotificationEngine?.Start();
+            }
+            catch (System.Exception ex)
+            {
+                _logger.LogError(ex, "Error while starting book notification engine: " + ex.Message);
+            }
+
+            try
+            {
                 // Deliberately NOT stopped-then-restarted here, unlike the notification engines
                 // above: those are recreated fresh every cycle (a new instance replaces the old
                 // one, so the old one's poll loop must be torn down first), but this engine is a
@@ -494,6 +523,24 @@ namespace Requestrr.WebApi.RequestrrBot
 
                         await CreateTvShowNotificationWorkflow(e)
                             .AddNotificationAsync(userId, tvDbId, seasonType, int.Parse(seasonNumber));
+                    }
+                    else if (e.Id.ToLower().StartsWith("bkrs"))
+                    {
+                        if (e.Values != null && e.Values.Any())
+                        {
+                            var v = e.Values.Single().Split("/");
+                            await _bookWorkflowFactory.CreateRequestingWorkflow(e.Interaction, int.Parse(v[0])).HandleBookSelectionAsync(v[1]);
+                        }
+                    }
+                    else if (e.Id.ToLower().StartsWith("bkrc"))
+                    {
+                        var p = e.Id.Split("/");  // BkRC/user/cat/bookId
+                        await _bookWorkflowFactory.CreateRequestingWorkflow(e.Interaction, int.Parse(p[2])).RequestBookAsync(p[3]);
+                    }
+                    else if (e.Id.ToLower().StartsWith("bknr"))
+                    {
+                        var p = e.Id.Split("/");  // BkNR/user/cat/bookId
+                        await _bookWorkflowFactory.CreateNotificationWorkflow(e.Interaction).AddNotificationBookAsync(p[1], int.Parse(p[2]), p[3]);
                     }
                     else if (e.Id.ToLower().StartsWith("mur"))
                     {

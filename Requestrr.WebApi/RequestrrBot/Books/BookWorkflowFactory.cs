@@ -41,7 +41,7 @@ namespace Requestrr.WebApi.RequestrrBot.Books
                 categoryId,
                 GetBookClient<IBookSearcher>(settings),
                 GetBookClient<IBookRequester>(settings),
-                new DiscordBookUserInterface(interaction, GetBookClient<IBookSearcher>(settings)),
+                new DiscordBookUserInterface(interaction, GetBookClient<IBookSearcher>(settings), categoryId),
                 CreateBookNotificationWorkflow(interaction, settings)
                 );
         }

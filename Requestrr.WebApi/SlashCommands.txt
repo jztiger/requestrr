@@ -10,6 +10,7 @@ using Requestrr.WebApi.RequestrrBot.ChatClients.Discord;
 using Requestrr.WebApi.RequestrrBot.Movies;
 using Requestrr.WebApi.RequestrrBot.TvShows;
 using Requestrr.WebApi.RequestrrBot.Music;
+using Requestrr.WebApi.RequestrrBot.Books;
 using Requestrr.WebApi.RequestrrBot.Locale;
 using Requestrr.WebApi.RequestrrBot.Redownload;
 using System.Collections.Generic;
@@ -146,6 +147,25 @@ namespace Requestrr.WebApi.RequestrrBot
                 }
             }
             [MUSIC_COMMAND_END]
+            [BOOK_COMMAND_START]
+            [SlashCommand("[REQUEST_BOOK_TITLE_NAME]", "Request a book by title")]
+            [RequireRoles(new ulong[] { [REQUIRED_BOOK_ROLE_IDS] })]
+            [RequireChannels(new ulong[] { [REQUIRED_CHANNEL_IDS] })]
+            public async Task BookByTitle[BOOK_CATEGORY_ID](InteractionContext ctx, [Option("title", "Book title (optionally with author)")] string title)
+            {
+                try
+                {
+                    var settings = _serviceProvider.Get<DiscordSettingsProvider>().Provide();
+                    await ctx.CreateResponseAsync(InteractionResponseType.ChannelMessageWithSource, new DiscordInteractionResponseBuilder().AsEphemeral(settings.AutomaticallyPurgeCommandMessages).WithContent(Language.Current.DiscordCommandSending));
+                    var workFlow = _serviceProvider.Get<BookWorkflowFactory>().CreateRequestingWorkflow(ctx.Interaction, [BOOK_CATEGORY_ID]);
+                    await workFlow.SearchBookAsync(title.Trim());
+                }
+                catch (System.Exception ex)
+                {
+                    _logger.LogError(ex, $"Error while searching book {title} : " + ex.Message);
+                }
+            }
+            [BOOK_COMMAND_END]
         }
         [REQUEST_COMMAND_END]
 
