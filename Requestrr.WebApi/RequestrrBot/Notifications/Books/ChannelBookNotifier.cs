@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Requestrr.WebApi.RequestrrBot.ChatClients.Discord;
 using Requestrr.WebApi.RequestrrBot.Books;
 using System;
+using Requestrr.WebApi.RequestrrBot.DownloadClients.Bookshelf;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -17,23 +18,27 @@ namespace Requestrr.WebApi.RequestrrBot.Notifications.Books
         private readonly DiscordClient _discordClient;
         private readonly ulong[] _channelIds;
         private readonly ILogger _logger;
+        private readonly BookshelfSettingsProvider _bookshelfSettings;
 
         public ChannelBookNotifier(
             DiscordClient discordClient,
             ulong[] channelIds,
-            ILogger logger
+            ILogger logger,
+            BookshelfSettingsProvider bookshelfSettings = null
         )
         {
+            _bookshelfSettings = bookshelfSettings ?? new BookshelfSettingsProvider();
             _discordClient = discordClient;
             _channelIds = channelIds;
             _logger = logger;
         }
 
 
-        public async Task<HashSet<string>> NotifyBookAsync(IReadOnlyCollection<string> userIds, Book book, CancellationToken token)
+        public async Task<HashSet<string>> NotifyBookAsync(IReadOnlyCollection<string> userIds, Book book, int categoryId, CancellationToken token)
         {
             if (_discordClient.Guilds.Any())
             {
+                string message = BookReadyMessage.Format(book, BookReadyMessage.ResolveCategoryName(_bookshelfSettings, categoryId));
                 HashSet<ulong> discordUserIds = new HashSet<ulong>(userIds.Select(x => ulong.Parse(x)));
                 HashSet<ulong> userNotified = new HashSet<ulong>();
 
@@ -47,7 +52,7 @@ namespace Requestrr.WebApi.RequestrrBot.Notifications.Books
 
                     try
                     {
-                        await NotifyUsersInChannelForBook(book, discordUserIds, userNotified, channel);
+                        await NotifyUsersInChannelForBook(book, message, discordUserIds, userNotified, channel);
                         await Task.Delay(TimeSpan.FromSeconds(1));
                     }
                     catch (Exception ex)
@@ -88,7 +93,7 @@ namespace Requestrr.WebApi.RequestrrBot.Notifications.Books
         }
 
 
-        private static async Task NotifyUsersInChannelForBook(Book book, HashSet<ulong> discordUserIds, HashSet<ulong> userNotified, DiscordChannel channel)
+        private static async Task NotifyUsersInChannelForBook(Book book, string message, HashSet<ulong> discordUserIds, HashSet<ulong> userNotified, DiscordChannel channel)
         {
             List<DiscordMember> usersToNotify = channel.Users
                 .Where(x => discordUserIds.Contains(x.Id))
@@ -98,7 +103,7 @@ namespace Requestrr.WebApi.RequestrrBot.Notifications.Books
             if (usersToNotify.Any())
             {
                 StringBuilder messageBuilder = new StringBuilder();
-                messageBuilder.AppendLine($"📚 **{book.Title}** by {book.AuthorName} is now available!");
+                messageBuilder.AppendLine(message);
 
                 foreach (DiscordMember user in usersToNotify)
                 {

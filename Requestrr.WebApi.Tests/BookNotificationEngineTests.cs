@@ -28,7 +28,7 @@ namespace Requestrr.WebApi.Tests
         private class FakeNotifier : IBookNotifier
         {
             public List<string> Notified = new List<string>();
-            public Task<HashSet<string>> NotifyBookAsync(IReadOnlyCollection<string> userIds, Book book, CancellationToken token)
+            public Task<HashSet<string>> NotifyBookAsync(IReadOnlyCollection<string> userIds, Book book, int categoryId, CancellationToken token)
             {
                 foreach (var u in userIds) Notified.Add(u + ":" + book.BookId);
                 return Task.FromResult(new HashSet<string>(userIds));

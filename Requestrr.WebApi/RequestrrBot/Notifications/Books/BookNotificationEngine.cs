@@ -74,7 +74,7 @@ namespace Requestrr.WebApi.RequestrrBot.Notifications.Books
 
                         try
                         {
-                            var notified = await _notifier.NotifyBookAsync(kv.Value.ToArray(), available[kv.Key.bookId], _tokenSource.Token);
+                            var notified = await _notifier.NotifyBookAsync(kv.Value.ToArray(), available[kv.Key.bookId], kv.Key.categoryId, _tokenSource.Token);
                             foreach (var u in notified)
                                 removeNotification(u, kv.Key.categoryId, kv.Key.bookId);
                         }

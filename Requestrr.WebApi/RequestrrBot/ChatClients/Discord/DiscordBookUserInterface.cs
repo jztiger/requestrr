@@ -60,7 +60,7 @@ namespace Requestrr.WebApi.RequestrrBot.ChatClients.Discord
         public async Task DisplayBookRequestSuccessAsync(Book book)
         {
             DiscordButtonComponent successButton = new DiscordButtonComponent(ButtonStyle.Success, "0/1/0", "Requested");
-            DiscordWebhookBuilder builder = (await AddPreviousDropdownsAsync(book, new DiscordWebhookBuilder().AddEmbed(GenerateBookDetails(book)))).AddComponents(successButton).WithContent($"📚 **{book.Title}** has been requested. You'll get a DM when it's ready.");
+            DiscordWebhookBuilder builder = (await AddPreviousDropdownsAsync(book, new DiscordWebhookBuilder().AddEmbed(GenerateBookDetails(book)))).AddComponents(successButton).WithContent($"📚 **{book.Title}** has been requested. You'll be notified when it's ready.");
             await _interactionContext.EditOriginalResponseAsync(builder);
         }
 
@@ -84,7 +84,7 @@ namespace Requestrr.WebApi.RequestrrBot.ChatClients.Discord
         public async Task AskForNotificationBookRequestAsync(Book book)
         {
             var notificationButton = new DiscordButtonComponent(ButtonStyle.Primary, $"BkNR/{_interactionContext.User.Id}/{_categoryId}/{book.BookId}", "Notify me", false, new DiscordComponentEmoji(DiscordEmoji.FromUnicode("🔔")));
-            DiscordWebhookBuilder builder = (await AddPreviousDropdownsAsync(book, new DiscordWebhookBuilder().AddEmbed(GenerateBookDetails(book)))).AddComponents(notificationButton).WithContent("This book was already requested. Want a DM when it's available?");
+            DiscordWebhookBuilder builder = (await AddPreviousDropdownsAsync(book, new DiscordWebhookBuilder().AddEmbed(GenerateBookDetails(book)))).AddComponents(notificationButton).WithContent("This book was already requested. Want to be notified when it's available?");
             await _interactionContext.EditOriginalResponseAsync(builder);
         }
 

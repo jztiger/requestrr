@@ -1,4 +1,5 @@
 using System;
+using Requestrr.WebApi.RequestrrBot.DownloadClients.Bookshelf;
 using DSharpPlus;
 using DSharpPlus.Entities;
 using DSharpPlus.Exceptions;
@@ -16,17 +17,20 @@ namespace Requestrr.WebApi.RequestrrBot.Notifications.Books
     {
         private readonly DiscordClient _discordClient;
         private readonly ILogger _logger;
+        private readonly BookshelfSettingsProvider _bookshelfSettings;
 
-        public PrivateMessageBookNotifier(DiscordClient discordClient, ILogger logger)
+        public PrivateMessageBookNotifier(DiscordClient discordClient, ILogger logger, BookshelfSettingsProvider bookshelfSettings = null)
         {
+            _bookshelfSettings = bookshelfSettings ?? new BookshelfSettingsProvider();
             _discordClient = discordClient;
             _logger = logger;
         }
 
 
-        public async Task<HashSet<string>> NotifyBookAsync(IReadOnlyCollection<string> userIds, Book book, CancellationToken token)
+        public async Task<HashSet<string>> NotifyBookAsync(IReadOnlyCollection<string> userIds, Book book, int categoryId, CancellationToken token)
         {
             HashSet<string> userNotified = new HashSet<string>();
+            string message = BookReadyMessage.Format(book, BookReadyMessage.ResolveCategoryName(_bookshelfSettings, categoryId));
 
             if (_discordClient.Guilds.Any())
             {
@@ -51,7 +55,7 @@ namespace Requestrr.WebApi.RequestrrBot.Notifications.Books
                         if (user != null)
                         {
                             DiscordDmChannel channel = await user.CreateDmChannelAsync();
-                            await channel.SendMessageAsync($"📚 **{book.Title}** by {book.AuthorName} is now available!", DiscordBookUserInterface.GenerateBookDetails(book));
+                            await channel.SendMessageAsync(message, DiscordBookUserInterface.GenerateBookDetails(book));
                             await Task.Delay(TimeSpan.FromSeconds(1));
                         }
                         else

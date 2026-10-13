@@ -45,6 +45,8 @@ namespace Requestrr.WebApi.RequestrrBot.DownloadClients.Bookshelf
             var coverUrl = (string)cover?["remoteUrl"];
             if (string.IsNullOrEmpty(coverUrl)) coverUrl = (string)cover?["url"];
 
+            bool monitored = j.Value<bool?>("monitored") ?? false;
+
             return new Book
             {
                 DownloadClientId = id > 0 ? id.ToString() : string.Empty,
@@ -56,8 +58,9 @@ namespace Requestrr.WebApi.RequestrrBot.DownloadClients.Bookshelf
                 Year = ParseYear(j["releaseDate"]),
                 Overview = (string)j["overview"] ?? string.Empty,
                 Available = available,
-                Monitored = j.Value<bool?>("monitored") ?? false,
-                Requested = id > 0 && !available,
+                Monitored = monitored,
+                // Readarr adds an author's whole backlist unmonitored; only a monitored, file-less book is a request.
+                Requested = id > 0 && !available && monitored,
                 PosterPath = coverUrl ?? string.Empty,
                 TitleSlug = (string)j["titleSlug"] ?? string.Empty
             };
@@ -199,12 +202,8 @@ namespace Requestrr.WebApi.RequestrrBot.DownloadClients.Bookshelf
                 if (id > 0)
                 {
                     // Already in the library: make sure it is monitored, then trigger a search if the category wants one.
-                    var get = await HttpGetAsync(c, $"/book/{id}");
-                    await get.ThrowIfNotSuccessfulAsync("BookshelfGetBook failed", x => x.error);
-                    var existing = JObject.Parse(await get.Content.ReadAsStringAsync());
-                    existing["monitored"] = true;
-                    var put = await HttpSendAsync(c, HttpMethod.Put, $"/book/{id}", existing);
-                    await put.ThrowIfNotSuccessfulAsync("BookshelfUpdateBook failed", x => x.error);
+                    var put = await HttpSendAsync(c, HttpMethod.Put, "/book/monitor", new JObject { ["bookIds"] = new JArray(id), ["monitored"] = true });
+                    await put.ThrowIfNotSuccessfulAsync("BookshelfMonitorBook failed", x => x.error);
 
                     if (c.SearchNewRequests)
                     {

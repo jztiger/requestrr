@@ -3,7 +3,13 @@ using System.Linq;
 
 namespace Requestrr.WebApi.RequestrrBot.Notifications.Books
 {
-    public class BookNotificationsRepository
+    public interface IBookNotificationsRepository
+    {
+        void AddNotification(string userId, int categoryId, string bookId);
+        bool HasNotification(string userId, int categoryId, string bookId);
+    }
+
+    public class BookNotificationsRepository : IBookNotificationsRepository
     {
         private readonly HashSet<(string userId, int categoryId, string bookId)> _n = new HashSet<(string, int, string)>();
         private readonly object _lock = new object();

@@ -80,7 +80,7 @@ namespace Requestrr.WebApi.RequestrrBot.Books
             IBookNotificationWorkflow bookNotificationWorkflow = new DisabledBookNotificationWorkflow(userInterface);
 
             if (settings.NotificationMode != NotificationMode.Disabled)
-                bookNotificationWorkflow = new BookNotificationWorkflow(_notificationsRepository, userInterface, GetBookClient<IBookSearcher>(settings), settings.AutomaticallyNotifyRequesters);
+                bookNotificationWorkflow = new BookNotificationWorkflow(_notificationsRepository, userInterface, GetBookClient<IBookSearcher>(settings), settings.AutomaticallyNotifyRequesters, categoryId);
 
             return bookNotificationWorkflow;
         }

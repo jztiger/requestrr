@@ -7,6 +7,6 @@ namespace Requestrr.WebApi.RequestrrBot.Notifications.Books
 {
     public interface IBookNotifier
     {
-        Task<HashSet<string>> NotifyBookAsync(IReadOnlyCollection<string> userIds, Book book, CancellationToken token);
+        Task<HashSet<string>> NotifyBookAsync(IReadOnlyCollection<string> userIds, Book book, int categoryId, CancellationToken token);
     }
 }

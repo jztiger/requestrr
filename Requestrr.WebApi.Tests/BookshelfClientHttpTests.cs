@@ -304,23 +304,19 @@ namespace Requestrr.WebApi.Tests
         }
 
         [Fact]
-        public async Task Request_InLibrary_GetsPutsMonitoredThenSearches()
+        public async Task Request_InLibrary_PutsBookMonitorThenSearches()
         {
             var (client, h) = Make(Cat());
             h.Routes["GET /api/v1/search?term=work:79106958"] = (HttpStatusCode.OK, $"[{Entry(InLibStub(4))}]");
-            h.Routes["GET /api/v1/book/4"] = (HttpStatusCode.OK, InLibFull(4, 0));
-            h.Routes["PUT /api/v1/book/4"] = (HttpStatusCode.Accepted, "{}");
+            h.Routes["PUT /api/v1/book/monitor"] = (HttpStatusCode.Accepted, "{}");
             h.Routes["POST /api/v1/command"] = (HttpStatusCode.Created, "{}");
 
             await client.RequestBookAsync(Req(), new Book { BookId = "79106958", Title = "Project Hail Mary" });
 
             var seq = h.Requests.Select(r => $"{r.Method} {r.Path}").ToList();
-            Assert.Equal(new[] { "GET /api/v1/search", "GET /api/v1/book/4", "PUT /api/v1/book/4", "POST /api/v1/command" }, seq);
-            var put = JObject.Parse(h.Requests[2].Body);
-            Assert.True((bool)put["monitored"]);
-            var fetched = JObject.Parse(InLibFull(4, 0)); fetched["monitored"] = true;
-            Assert.True(JToken.DeepEquals(fetched, put));
-            var cmd = JObject.Parse(h.Requests[3].Body);
+            Assert.Equal(new[] { "GET /api/v1/search", "PUT /api/v1/book/monitor", "POST /api/v1/command" }, seq);
+            Assert.True(JToken.DeepEquals(JObject.Parse(@"{""bookIds"":[4],""monitored"":true}"), JObject.Parse(h.Requests[1].Body)));
+            var cmd = JObject.Parse(h.Requests[2].Body);
             Assert.Equal("BookSearch", (string)cmd["name"]); Assert.Equal(4, (int)cmd["bookIds"][0]);
         }
 
@@ -329,10 +325,10 @@ namespace Requestrr.WebApi.Tests
         {
             var (client, h) = Make(Cat(0, "k", search: false));
             h.Routes["GET /api/v1/search?term=work:79106958"] = (HttpStatusCode.OK, $"[{Entry(InLibStub(4))}]");
-            h.Routes["GET /api/v1/book/4"] = (HttpStatusCode.OK, InLibFull(4, 0));
-            h.Routes["PUT /api/v1/book/4"] = (HttpStatusCode.Accepted, "{}");
+            h.Routes["PUT /api/v1/book/monitor"] = (HttpStatusCode.Accepted, "{}");
             await client.RequestBookAsync(Req(), new Book { BookId = "79106958", Title = "Project Hail Mary" });
-            Assert.DoesNotContain(h.Requests, r => r.Path == "/api/v1/command");
+            var seq = h.Requests.Select(r => $"{r.Method} {r.Path}").ToList();
+            Assert.Equal(new[] { "GET /api/v1/search", "PUT /api/v1/book/monitor" }, seq);
         }
 
         [Fact]

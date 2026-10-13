@@ -313,12 +313,20 @@ namespace Requestrr.WebApi.Tests
             Assert.StartsWith("https://m.media-amazon.com/", b.PosterPath); // remoteUrl preferred over the /MediaCover proxy path
         }
 
-        [Fact] // Review Focus 3
-        public void ConvertToBook_InLibraryNoFile_IsRequested()
+        [Fact] // Review Focus 3: Readarr adds an author's backlist unmonitored; that is NOT a request
+        public void ConvertToBook_InLibraryNoFileUnmonitored_IsNotRequested()
         {
             var b = BookshelfClientV1.ConvertToBook(JObject.Parse(BookInLibraryNoFile));
             Assert.Equal("3", b.DownloadClientId); Assert.Equal("The Lions of Lucerne", b.Title); Assert.Equal("Brad Thor", b.AuthorName); Assert.Equal(2002, b.Year);
-            Assert.False(b.Available); Assert.True(b.Requested); Assert.False(b.Monitored);
+            Assert.False(b.Available); Assert.False(b.Requested); Assert.False(b.Monitored);
+        }
+
+        [Fact]
+        public void ConvertToBook_InLibraryNoFileMonitored_IsRequested()
+        {
+            var j = JObject.Parse(BookInLibraryNoFile); j["monitored"] = true;
+            var b = BookshelfClientV1.ConvertToBook(j);
+            Assert.False(b.Available); Assert.True(b.Requested); Assert.True(b.Monitored);
         }
 
         [Fact]
