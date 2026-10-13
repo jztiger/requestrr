@@ -134,13 +134,14 @@ namespace Requestrr.WebApi.RequestrrBot.DownloadClients.Bookshelf
             throw new Exception("An error occurred while searching for a book with Bookshelf");
         }
 
+        /// <summary>Returns null when no book matches (Lidarr convention); throws (after logging) when a request fails.</summary>
         public async Task<Book> SearchBookByIdAsync(BookRequest request, string bookId)
         {
             try
             {
                 var c = Category(request.CategoryId);
                 var j = await FindByForeignIdAsync(c, bookId, null);
-                if (j != null) return await ConvertWithStatisticsAsync(c, j);
+                return j == null ? null : await ConvertWithStatisticsAsync(c, j);
             }
             catch (Exception ex)
             {
@@ -150,20 +151,24 @@ namespace Requestrr.WebApi.RequestrrBot.DownloadClients.Bookshelf
             throw new Exception("An error occurred while searching for a book by id with Bookshelf");
         }
 
+        /// <summary>
+        /// Per-id lookup (foreign book ids are not Bookshelf's internal ids, so there is no direct GET /book/{id}):
+        /// resolve each id through search, then fetch statistics for library hits. Costs ~2 calls per polled id
+        /// instead of downloading the whole library on every poll.
+        /// </summary>
         public async Task<Dictionary<string, Book>> SearchAvailableBooksAsync(int categoryId, HashSet<string> bookIds, CancellationToken token)
         {
             try
             {
                 var c = Category(categoryId);
                 var result = new Dictionary<string, Book>();
-                // One call: the whole library (includes statistics), filtered in memory.
-                var response = await HttpGetAsync(c, "/book");
-                await response.ThrowIfNotSuccessfulAsync("BookshelfBookList failed", x => x.error);
-                foreach (var j in JArray.Parse(await response.Content.ReadAsStringAsync()).OfType<JObject>())
+                foreach (var bookId in bookIds)
                 {
                     if (token.IsCancellationRequested) break;
-                    var b = ConvertToBook(j);
-                    if (b.BookId != null && bookIds.Contains(b.BookId) && b.Available) result[b.BookId] = b;
+                    var j = await FindByForeignIdAsync(c, bookId, null);
+                    if (j == null || (j.Value<int?>("id") ?? 0) <= 0) continue;
+                    var book = await ConvertWithStatisticsAsync(c, j);
+                    if (book.Available) result[bookId] = book;
                 }
                 return result;
             }
@@ -179,10 +184,16 @@ namespace Requestrr.WebApi.RequestrrBot.DownloadClients.Bookshelf
 
         public async Task<BookRequestResult> RequestBookAsync(BookRequest request, Book book)
         {
+            var notFound = false;
             try
             {
                 var c = Category(request.CategoryId);
-                var searchBook = await FindByForeignIdAsync(c, book.BookId, book) ?? throw new Exception($"Book {book.BookId} was not found in Bookshelf search");
+                var searchBook = await FindByForeignIdAsync(c, book.BookId, book);
+                if (searchBook == null)
+                {
+                    notFound = true;
+                    throw new Exception($"Book {book.BookId} was not found in Bookshelf search");
+                }
                 int id = searchBook.Value<int?>("id") ?? 0;
 
                 if (id > 0)
@@ -212,6 +223,7 @@ namespace Requestrr.WebApi.RequestrrBot.DownloadClients.Bookshelf
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"An error occurred requesting book \"{book.Title}\" from Bookshelf: {ex.Message}");
+                if (notFound) throw new Exception("The book could not be found in Bookshelf search");
             }
 
             throw new Exception("An error occurred while requesting a book from Bookshelf");
@@ -321,17 +333,11 @@ namespace Requestrr.WebApi.RequestrrBot.DownloadClients.Bookshelf
                 terms.Add(hint.Title);
             }
 
+            // HTTP failures propagate (distinct from "no match"); only a clean empty/non-matching result moves to the next term.
             foreach (var term in terms)
             {
-                try
-                {
-                    var match = (await SearchBookObjectsAsync(c, term)).FirstOrDefault(b => (string)b["foreignBookId"] == foreignBookId);
-                    if (match != null) return match;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, $"Bookshelf search \"{term}\" failed while resolving book {foreignBookId}: {ex.Message}");
-                }
+                var match = (await SearchBookObjectsAsync(c, term)).FirstOrDefault(b => (string)b["foreignBookId"] == foreignBookId);
+                if (match != null) return match;
             }
 
             return null;

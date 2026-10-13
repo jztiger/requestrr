@@ -2,7 +2,7 @@ namespace Requestrr.WebApi.RequestrrBot.DownloadClients.Bookshelf
 {
     public class BookshelfSettingsProvider
     {
-        public BookshelfSettings Provide()
+        public virtual BookshelfSettings Provide()
         {
             dynamic settings = SettingsFile.Read();
             return new BookshelfSettings
